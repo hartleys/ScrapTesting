@@ -9,9 +9,9 @@ import internalUtils.commandLineUI._;
 
 object runner {
   
-  final val UTIL_VERSION = "1.7.17"; // REPLACE_THIS_QORTS_VERSION_VARIABLE_WITH_VERSION_NUMBER          (note this exact text is used in a search-and-replace. Do not change it.)
-  final val UTIL_COMPILE_DATE = "Wed Oct 11 15:48:57 EDT 2017"; // REPLACE_THIS_QORTS_DATE_VARIABLE_WITH_DATE          (note this exact text is used in a search-and-replace. Do not change it.)
-  final val UTIL_COMPILE_TIME : Long = 1507751337; // REPLACE_THIS_QORTS_DATE_VARIABLE_WITH_TIME          (note this exact text is used in a search-and-replace. Do not change it.)
+  final val UTIL_VERSION = "1.7.18"; // REPLACE_THIS_QORTS_VERSION_VARIABLE_WITH_VERSION_NUMBER          (note this exact text is used in a search-and-replace. Do not change it.)
+  final val UTIL_COMPILE_DATE = "Thu Oct 12 10:14:29 EDT 2017"; // REPLACE_THIS_QORTS_DATE_VARIABLE_WITH_DATE          (note this exact text is used in a search-and-replace. Do not change it.)
+  final val UTIL_COMPILE_TIME : Long = 1507817669; // REPLACE_THIS_QORTS_DATE_VARIABLE_WITH_TIME          (note this exact text is used in a search-and-replace. Do not change it.)
 
   final val UTIL_MAJOR_VERSION = UTIL_VERSION.split("\\.")(0);
   final val UTIL_MINOR_VERSION = UTIL_VERSION.split("\\.")(1);

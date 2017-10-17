@@ -141,7 +141,9 @@ object VcfAnnotateTX {
           val lines = getLinesSmartUnzip(f);
           lines.map{line => line.split("\t")}.foreach(cells => {
               val (chrom,start,end,name) = (cells(0),string2int(cells(1)),string2int(cells(2)),cells(3))
-              arr.addSpan(internalUtils.commonSeqUtils.GenomicInterval(chrom, '.', start,end),name);
+              if(start != end){ 
+                arr.addSpan(internalUtils.commonSeqUtils.GenomicInterval(chrom, '.', start,end),name);
+              }
           })
           arr.finalizeStepVectors;
           ((c : String, p : Int) => { 

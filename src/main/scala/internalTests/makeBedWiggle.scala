@@ -300,6 +300,8 @@ object makeBedWiggle {
               spannedCdWindows.write(chr+"\t"+idx+"\t"+ct.toDouble / spannedWindowSize.toDouble+"\n")
             }}
             
+            
+            
             ivBedWriter match {
               case Some(ivwriter) => {
                 var currWindow = 0;
@@ -307,6 +309,7 @@ object makeBedWiggle {
                 var windowStart = -1;
                 var windowSpans : Vector[(Int,Int)] = Vector();
                 var prevIV : Option[GenomicInterval] = None;
+                val blankIV = GenomicInterval(chr,'.',0,0);
                 ivlist_cd.map{ iv => (iv, codingStepCountArrays(iv)) }.foreach{ case (iv,(txset,countArray)) => {
                   if(windowStart == -1){
                     windowStart = iv.start;
