@@ -876,6 +876,14 @@ object VcfTool {
     def sampleCt : Int = {
       getSampleList.length;
     }
+    
+    def copyHeader : SVcfHeader = {
+      SVcfHeader(infoLines = infoLines,
+                 formatLines = formatLines,
+                 otherHeaderLines = otherHeaderLines,
+                 titleLine = titleLine);
+    }
+    
   }
   
   abstract class SVcfLine {

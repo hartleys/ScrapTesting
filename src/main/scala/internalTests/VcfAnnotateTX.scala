@@ -61,6 +61,12 @@ object VcfAnnotateTX {
                                          valueName = "chr1,chr2,...",  
                                          argDesc =  "List of chromosomes. If supplied, then all analysis will be restricted to these chromosomes. All other chromosomes wil be ignored."
                                         ) ::
+                    new BinaryOptionArgument[String](
+                                         name = "intervalBedFile", 
+                                         arg = List("--intervalBedFile"), 
+                                         valueName = "bedfile.bed",  
+                                         argDesc =  ""
+                                        ) ::
                     new BinaryArgument[String](
                                          name = "GenoTag", 
                                          arg = List("--GenoTag"), 
@@ -102,7 +108,8 @@ object VcfAnnotateTX {
          ExtractSingletons(
              gttag = parser.get[String]("GenoTag"),
              dropNonSingletons = parser.get[Boolean]("keepOnlySingletons"),
-             infoTag = parser.get[String]("outputTag")
+             infoTag = parser.get[String]("outputTag"),
+             bedFile = parser.get[Option[String]]("intervalBedFile")
          ).walkVCFFile(
              infile = parser.get[String]("infile"),
              outfile = parser.get[String]("outfile"),
@@ -115,13 +122,44 @@ object VcfAnnotateTX {
     
   }
 
-  case class ExtractSingletons(gttag : String = "GT", infoTag : String = "SWH_SINGLETON_ID", dropNonSingletons : Boolean = true, dropGenotypes : Boolean = true) extends internalUtils.VcfTool.SVcfWalker {
+  case class ExtractSingletons(gttag : String = "GT", infoTag : String = "SWH_SINGLETON_ID", dropNonSingletons : Boolean = true, dropGenotypes : Boolean = true,
+                               bedFile : Option[String] = None) extends internalUtils.VcfTool.SVcfWalker {
 
     def walkVCF(vcIter : Iterator[SVcfVariantLine],vcfHeader : SVcfHeader, verbose : Boolean = true) : (Iterator[SVcfVariantLine],SVcfHeader) = {
       var errCt = 0;
       
+      val bedIdTag = "SWH_INTERVAL_IVID"
+      
       val outHeader = vcfHeader;
       outHeader.addInfoLine(new SVcfCompoundHeaderLine("INFO" ,infoTag, "1", "String", "If the variant is a singleton, then this will be the ID of the sample that has the variant."))
+      
+      val ivMap = bedFile match {
+        case Some(f) => {
+          outHeader.addInfoLine(new SVcfCompoundHeaderLine("INFO" ,bedIdTag, ".", "String", "The name of the interval region where this variant is found."))
+          val arr : internalUtils.genomicAnnoUtils.GenomicArrayOfSets[String] = internalUtils.genomicAnnoUtils.GenomicArrayOfSets[String](false);
+          reportln("   Beginning bed file read: "+f+" ("+getDateAndTimeString+")","debug");
+          val lines = getLinesSmartUnzip(f);
+          lines.map{line => line.split("\t")}.foreach(cells => {
+              val (chrom,start,end,name) = (cells(0),string2int(cells(1)),string2int(cells(2)),cells(3))
+              arr.addSpan(internalUtils.commonSeqUtils.GenomicInterval(chrom, '.', start,end),name);
+          })
+          arr.finalizeStepVectors;
+          ((c : String, p : Int) => { 
+            val currIvNames = arr.findIntersectingSteps(internalUtils.commonSeqUtils.GenomicInterval(c, '.', p,p+1)).foldLeft(Set[String]()){ case (soFar,(iv,currSet)) => {
+              soFar ++ currSet
+            }}.toList.sorted
+            if(currIvNames.size > 1){
+              warning("Warning: Variant spans multiple IVs","VariantSpansMultipleIVs",100)
+            }
+            currIvNames
+          })
+          
+        }
+        case None => {
+          ((c : String, p : Int) => List[String]())
+        }
+      }
+      
       val samps = outHeader.getSampleList
       
       (addIteratorCloseAction( iter = vcIter.flatMap{v => {
@@ -129,17 +167,26 @@ object VcfAnnotateTX {
         val gtidx = vc.genotypes.fmt.indexOf(gttag);
         val gt = vc.genotypes.genotypeValues(gtidx);
         val numAlt = gt.zipWithIndex.filter{ case (g,i) => { g.split("[/\\|]").exists(_ == "1") }};
+        
         if(numAlt.length == 1){
           vc.addInfo(infoTag, samps(numAlt.head._2))
+          val ivNames = ivMap(vc.chrom,vc.pos);
+          if(ivNames.length > 0){
+            vc.addInfo(bedIdTag, ivNames.mkString(","))
+          }
           Some(vc);
         } else if(dropNonSingletons){
           None;
         } else {
+          val ivNames = ivMap(vc.chrom,vc.pos);
+          if(ivNames.length > 0){
+            vc.addInfo(bedIdTag, ivNames.mkString(","))
+          }
           Some(vc)
         }
       }}, closeAction = (() => {
         //do nothing
-      })),vcfHeader)
+      })),outHeader)
       
     }
 

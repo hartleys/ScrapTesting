@@ -37,6 +37,10 @@ object makeBedWiggle {
                                          arg = List("--singleEnded"), // name of value
                                          argDesc = "Flag for single-end data. Note that many other options do not apply in this case (for example: option --countPairsTogether does nothing in single-end mode)" 
                                        ) ::
+                    new UnaryArgument(   name = "simpleIntervalBed", 
+                                         arg = List("--simpleIntervalBed"), // name of value
+                                         argDesc = ""
+                                       ) ::
                     new BinaryOptionArgument[List[String]](
                                          name = "filterBedFiles", 
                                          arg = List("--filterBedFiles"), 
@@ -83,7 +87,8 @@ object makeBedWiggle {
              filterBedFiles = parser.get[Option[List[String]]]("filterBedFiles"),
              inputSavedTxFile = parser.get[String]("inputSavedTxFile"),
              trackTitle = parser.get[String]("trackTitle"),
-             ivOutputFile = parser.get[Option[String]]("ivOutputFile")
+             ivOutputFile = parser.get[Option[String]]("ivOutputFile"),
+             simpleIntervalBed = parser.get[Boolean]("simpleIntervalBed")
          ).run();
        }
      }
@@ -95,7 +100,8 @@ object makeBedWiggle {
                                  windowCt : Int = 2000,
                                  spannedWindowSize : Int = 1000,
                                  ivOutputFile : Option[String],
-                                 chromLengthFile : Option[String] = None){
+                                 chromLengthFile : Option[String] = None,
+                                 simpleIntervalBed : Boolean = false){
     
     val BED_FILE_INTERNAL_TAG = "ON_TARGET_BED_FILE"
     
@@ -318,12 +324,18 @@ object makeBedWiggle {
                              "     prevIV="+(if(prevIV.isEmpty) "NA" else prevIV.get.chromName +","+ prevIV.get.start+","+ prevIV.get.end),"MisOrdered_IV",1000);
                     }
                     
-                    ivwriter.write(iv.chromName+"\t"+windowStart+"\t"+windowEndPos+"\t"+iv.chromName+"."+(currWindow+1)+
+                    if(simpleIntervalBed){
+                      windowSpans.map{ case (s,e) => {
+                        ivwriter.write(iv.chromName+"\t"+s+"\t"+e+"\t"+iv.chromName+"."+(currWindow+1)+"\n");
+                      }}
+                    } else {
+                      ivwriter.write(iv.chromName+"\t"+windowStart+"\t"+windowEndPos+"\t"+iv.chromName+"."+(currWindow+1)+
                         "\t1000\t.\t"+windowStart+"\t"+windowEndPos+"\t255,0,0\t"+
                         windowSpans.length +"\t"+
                         windowSpans.map{case (s,e) => e-s}.mkString(",")+"\t"+
                         windowSpans.map{case (s,e) => s - windowStart}.mkString(",")+
                         "\n");
+                    }
                     warning("Example interval: ("+windowStart+","+windowEndPos+"), "+windowSpans.map{ case (s,e) => "("+s+"-"+e+")"}.mkString(", "),"Note_example_IV",100);
                     
                     currWindow += 1;
@@ -335,6 +347,19 @@ object makeBedWiggle {
                   currPos = ivEndPos
                   prevIV = Some(iv);
                 }}
+                if(simpleIntervalBed){
+                      windowSpans.map{ case (s,e) => {
+                        ivwriter.write(chr+"\t"+s+"\t"+e+"\t"+chr+"."+(currWindow+1)+"\n");
+                      }}
+                } else {
+                  ivwriter.write(chr+"\t"+windowStart+"\t"+windowSpans.last._2+"\t"+chr+"."+(currWindow+1)+
+                        "\t1000\t.\t"+windowStart+"\t"+windowSpans.last._2+"\t255,0,0\t"+
+                        windowSpans.length +"\t"+
+                        windowSpans.map{case (s,e) => e-s}.mkString(",")+"\t"+
+                        windowSpans.map{case (s,e) => s - windowStart}.mkString(",")+
+                        "\n");
+                }
+                
                 ivwriter.flush();
               }
               case None => {
