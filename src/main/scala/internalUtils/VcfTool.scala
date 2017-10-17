@@ -1035,7 +1035,21 @@ object VcfTool {
       }
     }
     def getPloidy() : Int = genotypeValues(0).map{ (g : String) => {g.split("/").length}}.max;
+    
+    def addGenotypeArrayIfNew(fmtid : String, gval : Array[String]) : Int = {
+      val idx = fmt.indexWhere((p : String) => { p == fmtid });
+      if(idx != -1){
+        return idx;
+      } else {
+        fmt = fmt :+ fmtid
+        genotypeValues = genotypeValues :+ gval;
+        return genotypeValues.length - 1;
+      }
+    }
+    
   }
+  
+
   
   def getSVcfIterator(infile : String, chromList : Option[List[String]],numLinesRead : Option[Int]) : (Iterator[SVcfVariantLine],SVcfHeader) = {
       val (vcfHeader,vcIter) = if(chromList.isEmpty){
