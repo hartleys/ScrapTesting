@@ -787,10 +787,21 @@ object VcfTool {
     def makeCompoundLineFromString(line : String) : SVcfCompoundHeaderLine = {
       val tagPair = line.drop(2).split("=",2);
       val tag = tagPair(0);
+      var hasWarn = false;
       val tagmap = tagPair(1).tail.init.split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)").map(compoundString => {
         val ctp = compoundString.split("=",2);
-        (ctp(0),ctp(1));
+        (ctp(0),(if(ctp.length > 1){
+          cleanQuotes(ctp(1))
+        }else{
+          hasWarn = true;
+          warning("Warning: Malformed compound header line:\n\""+line+"\"","Malformed_Compound_Header_Line",-1);
+          "."
+        }));
       }).toMap;
+      
+      if(hasWarn){
+        warning("SVcfCompoundHeaderLine(tag = "+tag+", ID="+tagmap("ID")+", Number="+tagmap("Number")+", Type="+tagmap("Type")+", desc="+tagmap.getOrElse("Description",".")+")","Malformed_Compound_Header_Line_Continued",-1);
+      }
       
       SVcfCompoundHeaderLine(in_tag = tag, ID = tagmap("ID"), Number = tagmap("Number") ,  Type = tagmap("Type") , desc = tagmap.getOrElse("Description","."));
     }
@@ -1074,14 +1085,16 @@ object VcfTool {
   }
   def getSVcfIterators(infileString : String, chromList : Option[List[String]],numLinesRead : Option[Int], inputFileList : Boolean = false, withProgress : Boolean = true) : (Iterator[SVcfVariantLine],SVcfHeader) = {
       val indata = if(inputFileList){
-        val infiles = getLinesSmartUnzip(infileString)
-        val allInputLines = flattenIterators(infiles.map{inf => addIteratorCloseAction(iter =getLinesSmartUnzip(inf), closeAction = (() => {reportln("finished reading file: "+inf,"note")}))}).buffered
+        val (infilePeek,infiles) = peekIterator(getLinesSmartUnzip(infileString),1000);
+        val denominator = if(infilePeek.length < 1000) infilePeek.length.toString else "???";
+        val allInputLines = flattenIterators(infiles.zipWithIndex.map{case (inf,idx) => addIteratorCloseAction(iter =getLinesSmartUnzip(inf), closeAction = (() => {reportln("finished reading file: "+inf + "("+getDateAndTimeString+")" + "("+(idx+1)+"/"+denominator+")","note")}))}).buffered
         val headerLines = extractWhile(allInputLines)( a => a.startsWith("#"));
         val remainderLines = allInputLines.filter( a => ! a.startsWith("#"));
         headerLines.iterator ++ remainderLines;
       } else if(infileString.contains(',')){
         val infiles = infileString.split(",");
-        val allInputLines = flattenIterators(infiles.iterator.map{inf => addIteratorCloseAction(iter =getLinesSmartUnzip(inf), closeAction = (() => {reportln("finished reading file: "+inf,"note")}))}).buffered
+        val denominator = infiles.length.toString;
+        val allInputLines = flattenIterators(infiles.iterator.zipWithIndex.map{case (inf,idx) => addIteratorCloseAction(iter =getLinesSmartUnzip(inf), closeAction = (() => {reportln("finished reading file: "+inf + "("+getDateAndTimeString+")"+  "("+(idx+1)+"/"+denominator+")","note")}))}).buffered
         val headerLines = extractWhile(allInputLines)( a => a.startsWith("#"));
         val remainderLines = allInputLines.filter( a => ! a.startsWith("#"));
         headerLines.iterator ++ remainderLines;
@@ -1117,6 +1130,21 @@ object VcfTool {
       
       val (newIter,newHeader) = walkVCF(vcIter2,vcfHeader,verbose=true);
       
+      val writer = openWriterSmart(outfile);
+      newHeader.getVcfLines.foreach{line => {
+        writer.write(line+"\n");
+      }}
+      newIter.foreach{ line => {
+        writer.write(line.getVcfString+"\n");
+      }}
+      writer.close();
+    }
+    
+    //
+    
+    def walkVCFFiles(infiles : String, outfile : String, chromList : Option[List[String]], numLinesRead : Option[Int], inputFileList : Boolean){
+      val (vcIterRaw, vcfHeader) = getSVcfIterators(infiles,chromList=chromList,numLinesRead=numLinesRead,inputFileList = inputFileList);
+      val (newIter,newHeader) = walkVCF(vcIterRaw,vcfHeader,verbose=true);
       val writer = openWriterSmart(outfile);
       newHeader.getVcfLines.foreach{line => {
         writer.write(line+"\n");
@@ -1440,6 +1468,120 @@ object VcfTool {
                           val v = params.tail.toSet;
                           (a : SVcfVariantLine) => {
                             tagNonMissing(tag,a) && a.info(tag).get.split(",").flatMap{s => s.split("\\|")}.toSet.intersect(v).size > 0 ;
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="REF.len.eq", numParam = 1,desc="",
+                        (params : Seq[String]) => {
+                          val len = string2int(params(0));
+                          (a : SVcfVariantLine) => {
+                            a.ref.length == len
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="ALT.len.eq", numParam = 1,desc="",
+                        (params : Seq[String]) => {
+                          val len = string2int(params(0));
+                          (a : SVcfVariantLine) => {
+                            a.alt.head.length == len
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="REF.eq", numParam = 1,desc="",
+                        (params : Seq[String]) => {
+                          val gt = (params(0));
+                          (a : SVcfVariantLine) => {
+                            a.ref == gt
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="ALT.eq", numParam = 1,desc="",
+                        (params : Seq[String]) => {
+                          val gt = (params(0));
+                          (a : SVcfVariantLine) => {
+                            a.alt.head == gt
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="REF.isOneOf", numParam = -1,desc="",
+                        (params : Seq[String]) => {
+                          val gtset = params.toSet;
+                          (a : SVcfVariantLine) => {
+                            gtset.contains(a.ref)
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="ALT.isOneOf", numParam = -1,desc="",
+                        (params : Seq[String]) => {
+                          val gtset = params.toSet;
+                          (a : SVcfVariantLine) => {
+                            gtset.contains(a.alt.head)
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="GENO.hasTagPairMismatch", numParam = 2,desc="",
+                        (params : Seq[String]) => {
+                          val tag1 = params(0);
+                          val tag2 = params(1);
+                          (a : SVcfVariantLine) => {
+                            val idx1 = a.genotypes.fmt.indexOf(tag1);
+                            val idx2 = a.genotypes.fmt.indexOf(tag2);
+                            if(idx1 != -1 && idx2 != -1){
+                              a.genotypes.genotypeValues(idx1).zip(a.genotypes.genotypeValues(idx2)).exists{ case (v1,v2) => {
+                                v1 != v2;
+                              }}
+                            } else {
+                              false;
+                            }
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="GENO.hasTagPairGtStyleMismatch", numParam = 2,desc="",
+                        (params : Seq[String]) => {
+                          val tag1 = params(0);
+                          val tag2 = params(1);
+                          (a : SVcfVariantLine) => {
+                            val idx1 = a.genotypes.fmt.indexOf(tag1);
+                            val idx2 = a.genotypes.fmt.indexOf(tag2);
+                            if(idx1 != -1 && idx2 != -1){
+                              a.genotypes.genotypeValues(idx1).zip(a.genotypes.genotypeValues(idx2)).exists{ case (v1,v2) => {
+                                (! v1.contains('.')) && (! v2.contains('.')) && v1 != v2;
+                              }}
+                            } else {
+                              false;
+                            }
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="GENO.MAFgt", numParam = 2,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val frac = string2float(params(1));
+                          (a : SVcfVariantLine) => {
+                            val idx = a.genotypes.fmt.indexOf(tag);
+                            if(idx != -1){
+                              (a.genotypes.genotypeValues(idx).count{ x => {
+                                x.split("/").contains("1")
+                              }}.toFloat / a.genotypes.genotypeValues(idx).length.toFloat) > frac
+                            } else {
+                              false;
+                            }
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="GENO.MAFlt", numParam = 2,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val frac = string2float(params(1));
+                          (a : SVcfVariantLine) => {
+                            val idx = a.genotypes.fmt.indexOf(tag);
+                            if(idx != -1){
+                              (a.genotypes.genotypeValues(idx).count{ x => {
+                                x.split("/").contains("1")
+                              }}.toFloat / a.genotypes.genotypeValues(idx).length.toFloat) < frac
+                            } else {
+                              false;
+                            }
                           }
                         }
                       ),

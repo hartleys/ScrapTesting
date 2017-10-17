@@ -14,6 +14,22 @@ object stdUtils {
    * Math:
    **************************************************************************************************************************/
   
+  def getAllPossiblePairs(n : Int, includeIdentityPair : Boolean = false) : Seq[(Int,Int)] = {
+    if(includeIdentityPair){
+      (0 until n).flatMap{ i => {
+        (i until n).map{ j => {
+          (i,j)
+        }}
+      }}
+    } else {
+      (0 until n).flatMap{ i => {
+        (i+1 until n).map{ j => {
+          (i,j)
+        }}
+      }}
+    }
+  }
+  
   case class ReservoirSampler[A](K : Int, seed : Option[Int] = None)(implicit arg0: scala.reflect.ClassTag[A]){
     val reservoir : Array[A] = arg0.newArray(K);
     val rand : scala.util.Random = seed match {

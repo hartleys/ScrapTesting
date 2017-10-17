@@ -43,6 +43,258 @@ object VcfAnnotateTX {
                             (("C","G"),("G","C"))
                           );
   
+    
+  class CmdCalcGenotypeStatTable  extends CommandLineRunUtil{
+     override def priority = 20;
+     val parser : CommandLineArgParser = 
+       new CommandLineArgParser(
+          command = "compareVcfs", 
+          quickSynopsis = "", 
+          synopsis = "", 
+          description = "" + ALPHA_WARNING,
+          argList = 
+                    new BinaryOptionArgument[List[String]](
+                                         name = "chromList", 
+                                         arg = List("--chromList"), 
+                                         valueName = "chr1,chr2,...",  
+                                         argDesc =  "List of chromosomes. If supplied, then all analysis will be restricted to these chromosomes. All other chromosomes wil be ignored."
+                                        ) ::
+                                        /*
+                    new BinaryOptionArgument[String](
+                                         name = "sampleDecoder", 
+                                         arg = List("--sampleDecoder"), 
+                                         valueName = "sampleDecoder.txt",  
+                                         argDesc =  ""
+                                        ) ::
+                    new BinaryArgument[String](
+                                         name = "GenoTag1", 
+                                         arg = List("--GenoTag1"), 
+                                         valueName = "GT",  
+                                         argDesc =  "",
+                                         defaultValue = Some("GT")
+                                        ) ::
+                    new UnaryArgument( name = "infileList",
+                                         arg = List("--infileList"), // name of value
+                                         argDesc = ""+
+                                                   "" // description
+                                       ) ::*/
+                                        
+                    new BinaryArgument[String](
+                                         name = "GenoTag", 
+                                         arg = List("--GenoTag"), 
+                                         valueName = "GT",  
+                                         argDesc =  "",
+                                         defaultValue = Some("GT")
+                                        ) ::
+                    new UnaryArgument( name = "infileList",
+                                         arg = List("--infileList"), // name of value
+                                         argDesc = ""+
+                                                   "" // description
+                                       ) ::
+                    new FinalArgument[String](
+                                         name = "infile",
+                                         valueName = "variants.vcf",
+                                         argDesc = "input VCF file. Can be gzipped or in plaintext." // description
+                                        ) ::
+                    new FinalArgument[String](
+                                         name = "tagFile",
+                                         valueName = "tagFile.txt",
+                                         argDesc = "Can be gzipped or in plaintext." // description
+                                        ) ::
+                    new FinalArgument[String](
+                                         name = "outfileprefix",
+                                         valueName = "outfileprefix",
+                                         argDesc = "The output file."// description
+                                        ) ::
+                    internalUtils.commandLineUI.CLUI_UNIVERSAL_ARGS );
+
+     def run(args : Array[String]) {
+       val out = parser.parseArguments(args.toList.tail);
+       if(out){
+         CalcGenotypeTableStat(
+                          infile = parser.get[String]("infile"),
+                          outfile = parser.get[String]("outfileprefix"),
+                          tagFile = parser.get[String]("tagFile"),
+                          chromList = parser.get[Option[List[String]]]("chromList"),
+                          genoTag = parser.get[String]("GenoTag"),
+                          infileList = parser.get[Boolean]("infileList"),
+                          filterExpressionSet = parser.get[Option[String]]("filterExpressionSet")
+         ).run()
+       }
+     }
+    
+  }
+  
+  case class CalcGenotypeTableStat(infile : String,
+                              outfile : String,
+                              tagFile : String,
+                              chromList : Option[List[String]],
+                              genoTag : String,
+                              infileList : Boolean,
+                              filterExpressionSet : Option[String]) {
+    
+    val tagSet = getLinesSmartUnzip(tagFile).toVector.map{ line =>{
+      val cells = line.split("\t");
+      val tagID = cells(0);
+      val tagFmt = cells(1);
+      val tagReadFunc : (String => Int) = if(tagFmt == "Int"){
+        ((tv : String) => string2int(tv))
+      } else if(tagFmt == "sumInt"){
+        ((tv : String) => tv.split(",").map{string2int(_)}.sum)
+      } else {
+        error("Fatal error: unsupported TAG format!");
+        ((tv : String) => 0)
+      }
+      
+      val tagIV = cells.tail.tail.map{cell => {cell.split("_").map{string2int(_)}}}.map{s => (s(0),s(1))}
+      val arrayLen = tagIV.length + 3;
+      val lowIdx = tagIV.length;
+      val highIdx = tagIV.length + 1;
+      val naIdx = tagIV.length + 2;
+      val arrayLabels = tagIV.map{ case (l : Int,h : Int) => l+"-"+h} ++ Vector[String]("<"+tagIV.head._1,">="+tagIV.last._2,"NA")
+      val getIndices = ((gs : SVcfGenotypeSet) => {
+        val tagIdx = gs.fmt.indexOf(tagID);
+        if(tagIdx != -1){
+          gs.genotypeValues(0).indices.toArray.map{ sampleIdx => {
+            val tagVal = tagReadFunc(gs.genotypeValues(tagIdx)(sampleIdx));
+            if(tagVal < tagIV.head._1){
+              lowIdx
+            } else if(tagVal >= tagIV.last._2){
+              highIdx
+            } else {
+              tagIV.indexWhere{case (l : Int,h : Int) => tagVal >= l && tagVal < h}
+            }
+          }}
+        } else {
+          Array.fill[Int](gs.genotypeValues(0).length)(naIdx);
+        }
+      })
+      
+      (tagID,tagFmt,arrayLabels,getIndices);
+    }}
+    
+    val NUM_GT_IDXES = 6;
+    val GT_IDXES_LABELS = Vector("Miss","HomRef","Het","HomAlt","OtherAlt","OTHER");
+    
+    def getGTIdx(gt : String) : Int = {
+          if(gt.contains('.')){
+            0
+          } else if(gt == "0/0"){
+            1
+          } else if(gt == "0/1"){
+            2
+          } else if(gt == "1/1"){
+            3
+          } else if(gt.split("/").contains("1")){
+            4
+          } else {
+            5
+          }
+    }
+    
+    val tagPairs = getAllPossiblePairs(tagSet.length);
+    
+    def getAllIndices(vc : SVcfVariantLine) : (Array[Int],Array[Array[Int]]) = {
+      val gtTagIdx = vc.genotypes.fmt.indexOf(genoTag);
+      val gtIndices = vc.genotypes.genotypeValues(gtTagIdx).map{gt => {getGTIdx(gt)}}.toArray
+      val tagIndices = tagSet.map{ case (tagID,tagFmt,arrayLabels,getIndicesFunc) => {
+        getIndicesFunc(vc.genotypes);
+      }}.toArray
+      (gtIndices, tagIndices);
+    }
+    
+    class VariantCountSetByAllTags(ct : Int) {
+      val tagCts = tagSet.map{ case (tagID,tagFmt,arrayLabels,getIndicesFunc) => {
+        Array.fill[Int](arrayLabels.length,ct,NUM_GT_IDXES)(0);
+      }}.toArray;
+      val tagPairCts = tagPairs.map{ case (idx1,idx2) => {
+        Array.fill[Int](tagSet(idx1)._3.length,tagSet(idx2)._3.length,ct,NUM_GT_IDXES)(0);
+      }}.toArray;
+      
+      def addVC(gtIndices : Array[Int], tagIndices : Array[Array[Int]]){
+        tagIndices.indices.foreach{ i =>
+          tagIndices(i).indices.foreach{ j => {
+            tagCts(i)(tagIndices(i)(j))(j)(gtIndices(j)) += 1;
+          }}
+        }
+        tagPairs.indices.map{ case i => {
+          val (i1,i2) = tagPairs(i);
+          tagIndices(i1).indices.foreach{ j => {
+            tagPairCts(i)(tagIndices(i1)(j))(tagIndices(i2)(j))(j)(gtIndices(j)) += 1;
+          }}
+        }}
+      }
+      
+      def getOutputLines() : Iterator[String] = {
+        tagSet.zipWithIndex.iterator.flatMap{case ((tagID,tagFmt,arrayLabels,getIndicesFunc),i) => {
+          arrayLabels.indices.flatMap{ j => {
+            (0 until NUM_GT_IDXES).map{ gtidx => {
+              tagID+":"+arrayLabels(j)+":"+GT_IDXES_LABELS(gtidx)+"\t"+
+              (0 until ct).map{sampIdx => {
+                tagCts(i)(j)(sampIdx)(gtidx);
+              }}.mkString("\t");
+            }}
+          }}
+        }} ++ 
+        tagPairs.zipWithIndex.iterator.flatMap{ case ((i1,i2),i) => {
+          val (tagID1,tagFmt1,arrayLabels1,getIndicesFunc1) = tagSet(i1);
+          val (tagID2,tagFmt2,arrayLabels2,getIndicesFunc2) = tagSet(i2);
+          arrayLabels1.indices.flatMap{ j1 => {
+            arrayLabels2.indices.flatMap{ j2 => {
+              (0 until NUM_GT_IDXES).map{ gtidx => {
+                "TAGPAIR:"+tagID1+":"+tagID2+":"+arrayLabels1(j1)+":"+arrayLabels2(j2)+":"+GT_IDXES_LABELS(gtidx)+"\t"+
+                (0 until ct).map{sampIdx => {
+                  tagPairCts(i)(j1)(j2)(sampIdx)(gtidx);
+                }}.mkString("\t");
+              }}
+            }}
+          }}
+        }}
+      }
+    }
+    
+    /*
+      val subsetList : Seq[(String,SFilterLogic[SVcfVariantLine],VariantCountSetSet)] = subFilterExpressionSets match { 
+        case Some(sfes) => {
+          val sfesSeq = sfes.split(",")
+          sfesSeq.map{ sfe =>
+            val sfecells = sfe.split("=").map(_.trim());
+            if(sfecells.length != 2) error("ERROR: subfilterExpression must have format: subfiltertitle=subfilterexpression");
+            val (sfName,sfString) = (sfecells(0),sfecells(1));
+            val parser : SVcfFilterLogicParser = internalUtils.VcfTool.SVcfFilterLogicParser();
+            val filter : SFilterLogic[SVcfVariantLine] = parser.parseString(sfString);
+            (sfName+"_",filter,makeVariantCountSetSet(sampleCt))
+          }
+        }
+        case None => {
+          Seq();
+        }
+      }
+      val setList : Seq[(String,SFilterLogic[SVcfVariantLine],VariantCountSetSet)] = Seq(("",SFilterTrue[SVcfVariantLine](),makeVariantCountSetSet(sampleCt))) ++ subsetList;
+       */
+    
+    def run(){
+      val (vcIterRaw, vcfHeader) = getSVcfIterators(infile,chromList,None,inputFileList = infileList);
+      val vcIter = vcIterRaw.buffered;
+      
+      val cts = new VariantCountSetByAllTags(vcfHeader.sampleCt);
+      
+      vcIter.foreach{vc => {
+        val (gtIndices, tagIndices) = getAllIndices(vc);
+        cts.addVC(gtIndices,tagIndices);
+      }}
+      
+      val writer = openWriterSmart(outfile);
+      writer.write("FIELD\t"+vcfHeader.getSampleList.mkString("\t")+"\n");
+      cts.getOutputLines().foreach{ line => {
+        writer.write(line+"\n");
+      }}
+      writer.close();
+    }
+  }
+    
+    
+    
   class compareVcfs extends CommandLineRunUtil {
      override def priority = 20;
      val parser : CommandLineArgParser = 
@@ -88,6 +340,18 @@ object VcfAnnotateTX {
                                          argDesc = ""+
                                                    "" // description
                                        ) ::
+                    new BinaryOptionArgument[String](
+                                         name = "filterExpression1", 
+                                         arg = List("--filterExpression1"), 
+                                         valueName = "filterExpr",  
+                                         argDesc =  ""
+                                        ) ::
+                    new BinaryOptionArgument[String](
+                                         name = "filterExpression2", 
+                                         arg = List("--filterExpression2"), 
+                                         valueName = "filterExpr",  
+                                         argDesc =  ""
+                                        ) ::
                     new FinalArgument[String](
                                          name = "infile1",
                                          valueName = "variants1.vcf",
@@ -117,7 +381,9 @@ object VcfAnnotateTX {
                           genoTag2 = parser.get[String]("GenoTag2"),
                           infileList = parser.get[Boolean]("infileList"),
                           gzipOutput = ! parser.get[Boolean]("noGzipOutput"),
-                          sampleDecoder = parser.get[Option[String]]("sampleDecoder")
+                          sampleDecoder = parser.get[Option[String]]("sampleDecoder"),
+                          filterExpression1 = parser.get[Option[String]]("filterExpression1"),
+                          filterExpression2 = parser.get[Option[String]]("filterExpression2")
          ).run()
        }
      }
@@ -135,10 +401,24 @@ object VcfAnnotateTX {
                               file2Desc : String = "(For Alt Build) ",
                               infileList : Boolean,
                               gzipOutput : Boolean,
-                              sampleDecoder : Option[String]){
+                              sampleDecoder : Option[String],
+                              filterExpression1: Option[String],
+                              filterExpression2 : Option[String]){
+    
+    
+    val filterparser : SVcfFilterLogicParser = internalUtils.VcfTool.SVcfFilterLogicParser();
+    val filter1 : SFilterLogic[SVcfVariantLine] = filterExpression1 match {
+      case Some(sfString) => filterparser.parseString(sfString);
+      case None => SFilterTrue[SVcfVariantLine]();
+    }
+    val filter2 : SFilterLogic[SVcfVariantLine] = filterExpression2 match {
+      case Some(sfString) => filterparser.parseString(sfString);
+      case None => SFilterTrue[SVcfVariantLine]();
+    }
+    
     val (vcIterRaw1, vcfHeader1) = getSVcfIterators(infile1,chromList,None,inputFileList = infileList);
     val (vcIterRaw2, vcfHeader2) = getSVcfIterators(infile2,chromList,None,inputFileList = infileList, withProgress = false);
-    val (vcIter1,vcIter2) = (vcIterRaw1.buffered, vcIterRaw2.buffered)
+    val (vcIter1,vcIter2) = (vcIterRaw1.filter(vc => filter1.keep(vc)).buffered, vcIterRaw2.filter(vc => filter2.keep(vc)).buffered)
     var currChrom = vcIter1.head.chrom;
     
     val outfileSuffix = if(gzipOutput) ".gz" else "";
@@ -926,7 +1206,111 @@ object VcfAnnotateTX {
     
   }
   
+  class CmdAddTxBed extends CommandLineRunUtil {
+     override def priority = 20;
+     val parser : CommandLineArgParser = 
+       new CommandLineArgParser(
+          command = "addTxBed", 
+          quickSynopsis = "", 
+          synopsis = "", 
+          description = "" + ALPHA_WARNING,
+          argList = 
+                    new BinaryOptionArgument[List[String]](
+                                         name = "chromList", 
+                                         arg = List("--chromList"), 
+                                         valueName = "chr1,chr2,...",  
+                                         argDesc =  "List of chromosomes. If supplied, then all analysis will be restricted to these chromosomes. All other chromosomes wil be ignored."
+                                        ) ::
+                    new FinalArgument[String](
+                                         name = "infile",
+                                         valueName = "variants.vcf",
+                                         argDesc = "input VCF file. Can be gzipped or in plaintext." // description
+                                        ) ::
+                    new FinalArgument[List[String]](
+                                         name = "bedfiles",
+                                         valueName = "tagID:filedesc:bedfile.bed,tagID2:filedesc2:bedfile2.bed,...",
+                                         argDesc = "A BED file. Can be gzipped or in plaintext." // description
+                                        ) ::
+                    new FinalArgument[String](
+                                         name = "outfile",
+                                         valueName = "outfile.vcf.gz",
+                                         argDesc = "The output file. Can be gzipped or in plaintext."// description
+                                        ) ::
+                    internalUtils.commandLineUI.CLUI_UNIVERSAL_ARGS );
+
+     def run(args : Array[String]) {
+       val out = parser.parseArguments(args.toList.tail);
+       if(out){
+         AddTxBed(
+             bt = parser.get[List[String]]("bedfiles"),
+             chromList = parser.get[Option[List[String]]]("chromList")
+         ).walkVCFFile(
+             infile = parser.get[String]("infile"),
+             outfile = parser.get[String]("outfile"),
+             chromList = parser.get[Option[List[String]]]("chromList")
+         )
+       }
+     }
+    
+  }
   
+  case class AddTxBed(bt : List[String], chromList : Option[List[String]]) extends internalUtils.VcfTool.VCFWalker {
+    
+    val chromFunc : (String => Boolean) = chromList match {
+      case Some(cl) => {
+        val chromSet = cl.toSet;
+        ((chr : String) => chromSet.contains(chr))
+      }
+      case None =>{
+        ((chr : String) => true)
+      }
+    }
+    
+    val bedTags : Seq[(String,String,internalUtils.commonSeqUtils.GenomicInterval => Boolean)] = 
+          bt.map{b => {
+            val pair : Array[String] = b.split(":");
+            if(pair.length != 3) error("Each comma-delimited element of parameter addBedTags must have exactly 3 colon-delimited elements (tag:desc:filename.bed).")
+            val (t,desc,f) : (String,String,String) = (pair(0),pair(1),pair(2));
+            val arr : internalUtils.genomicAnnoUtils.GenomicArrayOfSets[String] = internalUtils.genomicAnnoUtils.GenomicArrayOfSets[String](false);
+            reportln("   Beginning bed file read: "+f+" ("+getDateAndTimeString+")","debug");
+            val lines = getLinesSmartUnzip(f);
+            lines.map{line => line.split("\t")}.withFilter{cells => { chromFunc(cells(0)) }}.foreach(cells => {
+              val (chrom,start,end) = (cells(0),string2int(cells(1)),string2int(cells(2)))
+              arr.addSpan(internalUtils.commonSeqUtils.GenomicInterval(chrom, '.', start,end), "CE");
+            })
+            arr.finalizeStepVectors;
+            reportln("   Finished bed file read: "+f+" ("+getDateAndTimeString+")","debug");
+            val isOnBedFunc : (internalUtils.commonSeqUtils.GenomicInterval => Boolean) = {
+              (iv : internalUtils.commonSeqUtils.GenomicInterval) => {
+                ! arr.findIntersectingSteps(iv).foldLeft(Set[String]()){case (soFar,(iv,currSet)) => {
+                  soFar ++ currSet;
+                }}.isEmpty
+              }
+            }
+            (t,desc,isOnBedFunc)
+    }}
+    
+    def walkVCF(vcIter : Iterator[VariantContext],vcfHeader : VCFHeader, verbose : Boolean = true) : (Iterator[VariantContext],VCFHeader) = {
+      
+      val newHeaderLines = bedTags.map{ case (tagString,descString,bedFunction) => {
+          new VCFInfoHeaderLine(tagString, 1, VCFHeaderLineType.Integer, "Variant is found on bed file "+descString)
+      }}
+      
+      val newHeader = internalUtils.VcfTool.addHeaderLines(vcfHeader,newHeaderLines);
+      
+      (vcIter.map{v => {
+        var vb = new htsjdk.variant.variantcontext.VariantContextBuilder(v);
+        val variantIV = internalUtils.commonSeqUtils.GenomicInterval(v.getContig(),'.', start = v.getStart() - 1, end = math.max(v.getEnd(),v.getStart+1));
+        bedTags.foreach{ case (tagString,desc,bedFunction) => {
+          vb = vb.attribute(tagString, if(bedFunction(variantIV)) "1" else "0");
+        }}
+        vb.make();
+      }},newHeader)
+      
+    }
+
+    
+  }
   
   
   class addTXAnno extends CommandLineRunUtil {
@@ -1430,7 +1814,7 @@ object VcfAnnotateTX {
       var vInfo = Vector[Vector[String]]();
       
       val refAlle = v.getReference();
-      val altAlleles = Range(0,v.getNAlleles()-1).map((a) => v.getAlternateAllele(a));
+      val altAlleles = Range(0,v.getNAlleles()-1).map((a) => v.getAlternateAllele(a)).filter{ alt => alt.getBaseString() != "*" }
       if(altAlleles.length > 0){
         val start = v.getStart - 1
         val end = start + refAlle.length() // math.max(refAlle.length(), altAlleles.map(a => a.length()).max)
@@ -3520,10 +3904,7 @@ object VcfAnnotateTX {
     }
   }
 
-  case class CalcVariantCountSummary(genotypeTag : String = "GT", keepAltChrom : Boolean = false, singletonGTfile : Option[String] = None,
-                                     subFilterExpressionSets : Option[String] = None,
-                                     bySwapCounts : Boolean = true) {
-    
+  
     case class VariantCountSet(
         ctHet : Array[Long],
         ctRef : Array[Long],
@@ -3570,6 +3951,12 @@ object VcfAnnotateTX {
           Array.fill[Long](ct)(0)
       )
     }
+  
+  case class CalcVariantCountSummary(genotypeTag : String = "GT", keepAltChrom : Boolean = false, singletonGTfile : Option[String] = None,
+                                     subFilterExpressionSets : Option[String] = None,
+                                     bySwapCounts : Boolean = true) {
+    
+
     
     //SNVVARIANT_BASESWAP_LIST = Seq( (("A","C"),("T","G")),...
     
@@ -4425,6 +4812,11 @@ object VcfAnnotateTX {
                                          valueName = "chr1,chr2,...",  
                                          argDesc =  "List of chromosomes. If supplied, then all analysis will be restricted to these chromosomes. All other chromosomes wil be ignored."
                                         ) ::
+                    new UnaryArgument( name = "infileList",
+                                         arg = List("--infileList"), // name of value
+                                         argDesc = ""+
+                                                   "" // description
+                                       ) ::
                     new FinalArgument[String](
                                          name = "infile",
                                          valueName = "infile.vcf.gz",
@@ -4447,11 +4839,12 @@ object VcfAnnotateTX {
        if(out){
          VcfExpressionFilter(
              filterExpr = parser.get[String]("variantFilterExpression")
-         ).walkVCFFile(
-             infile = parser.get[String]("infile"),
+         ).walkVCFFiles(
+             infiles = parser.get[String]("infile"),
              outfile = parser.get[String]("outfile"),
              chromList = parser.get[Option[List[String]]]("chromList"),
-             numLinesRead = parser.get[Option[Int]]("numLinesRead")
+             numLinesRead = parser.get[Option[Int]]("numLinesRead"),
+             inputFileList = parser.get[Boolean]("infileList")
          )
        }
      }
