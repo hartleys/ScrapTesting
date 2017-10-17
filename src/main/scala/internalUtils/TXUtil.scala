@@ -916,14 +916,14 @@ object TXUtil {
   }
 
   //pVariantInfo(txid, start, end, alt, varTypes : Seq[String])
-  case class pVariantInfo(txid : String, pvar : String, start : Int, end : Int, altAA : String, cType : String, severityType : String, pType : String, subType : String){
+  case class pVariantInfo(txid : String, pvar : String, start : Int, end : Int, altAA : String, cType : String, severityType : String, pType : String, subType : String, ID : String = ""){
     lazy val isSwap : Boolean = subType == "swapAA";
     lazy val varType : String = cType + "_" + severityType + "_" + pType +"_"+subType;
     def saveToString(delim : String = "/") : String = {
       txid + delim + pvar + delim + start + delim + end + delim + altAA + delim + cType + delim + severityType + delim + pType + delim + subType;
     }
   }
-  def getPvarInfoFromString(str : String, delim : String = "/") : pVariantInfo = {
+  def getPvarInfoFromString(str : String, delim : String = "/", ID : String = "") : pVariantInfo = {
     val cells = str.split(delim,-1);
     if(cells.length != 9){
       error("Error: pVariantInfo unpack: supplied string is malformatted: length = "+cells.length+"\n Supplied String=\""+str+"\"\ncells = [\""+cells.mkString("\",\"")+"\"]");
@@ -936,7 +936,8 @@ object TXUtil {
                  cType = cells(5), 
                  severityType = cells(6), 
                  pType = cells(7), 
-                 subType = cells(8));
+                 subType = cells(8),
+                 ID = ID);
     
   }
   

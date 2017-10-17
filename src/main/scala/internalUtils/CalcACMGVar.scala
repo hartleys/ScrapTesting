@@ -79,6 +79,14 @@ object CalcACMGVar {
                                          argDesc =  "This file must contain at least four columns (labelled in a header line): chrom, start, end, and domainID."
                                         ) :: 
                     new BinaryOptionArgument[String](
+                                         name = "inSilicoKeys", 
+                                         arg = List("--inSilicoKeys"), 
+                                         valueName = "dbNSFP_MetaSVM_pred:D:T",  
+                                         argDesc =  "This must be a comma-delimited list (no spaces). Each element in the list must consist of 3 parts, seperated by colons (\":\"). "+
+                                                    "The first part is the INFO key referring to the stored results of an in silico prediction algorithm. The 2nd is a \"|\"-delimited list "+
+                                                    "of the values that should be interpreted as \"predicted damaging\", and the third is a \"|\"-delimited list of the values that should be interpreted as \"predicted benign\""
+                                        ) :: 
+                    new BinaryOptionArgument[String](
                                          name = "conservedElementFile", 
                                          arg = List("--conservedElementFile"), 
                                          valueName = "conservedElementFile.txt",  
@@ -134,7 +142,8 @@ object CalcACMGVar {
                    conservedElementFile = parser.get[Option[String]]("conservedElementFile"),
                    BA1_AF = parser.get[Double]("BA1_AF"),
                    PM2_AF = parser.get[Double]("PM2_AF"),
-                   rmskFile = parser.get[Option[String]]("rmskFile")//,
+                   rmskFile = parser.get[Option[String]]("rmskFile"),
+                   inSilicoParams = parser.get[Option[String]]("inSilicoKeys")
                    //dropKeys = parser.get[Option[List[String]]]("dropKeys"),
                    ).walkVCFFile(
                    infile    = parser.get[String]("invcf"),
@@ -146,6 +155,14 @@ object CalcACMGVar {
   }
   }
   
+  /*
+   * 
+         Vector[(String,Set[String],Set[String])](
+          ("dbNSFP_MetaSVM_pred",Set[String]("D"),Set[String]("T"))//, //Includes predictors:   PolyPhen-2, SIFT, LRT, MutationTaster, Mutation Assessor, FATHMM, GERP++, PhyloP, SiPhy
+                        //("dbNSFP_PROVEAN_pred",Set[String]("D"))
+                    )
+   * 
+   */
   case class AssessACMGWalker(
                  chromList : Option[List[String]],
                  clinVarVcf : String,
@@ -156,17 +173,30 @@ object CalcACMGVar {
                  conservedElementFile : Option[String],
                  BA1_AF : Double,
                  PM2_AF : Double,
-                 rmskFile : Option[String]
+                 rmskFile : Option[String],
+                 inSilicoParams : Option[String] = None,
+                 inSilicoMinCt : Option[Int] = None
                 ) extends internalUtils.VcfTool.VCFWalker {
     
     reportln("Creating AssessACMGWalker() ["+stdUtils.getDateAndTimeString+"]","note")
     
-    val inSilicoKeys : Seq[(String,Set[String],Set[String])] = Vector[(String,Set[String],Set[String])](
-                        ("dbNSFP_MetaSVM_pred",Set[String]("D"),Set[String]("T"))//, //Includes predictors:   PolyPhen-2, SIFT, LRT, MutationTaster, Mutation Assessor, FATHMM, GERP++, PhyloP, SiPhy
-                        //("dbNSFP_PROVEAN_pred",Set[String]("D"))
-                    )
-    val inSilicoMinCt = -1;
-    val inSilicoMin = if(inSilicoMinCt == -1) inSilicoKeys.size else inSilicoMinCt;
+    val inSilicoKeysOpt : Option[Seq[(String,Set[String],Set[String])]] = inSilicoParams match {
+      case Some(isk) => {
+        Some(isk.split(",").toSeq.map(s => {
+          val cells = s.split(":");
+          if(cells.length != 3){
+            error("Malformed input parameter: each comma-delimited element in inSilicoKeys must have 3 colon-delimited parts!");
+          }
+          (cells(0),cells(1).split("\\|").toSet,cells(2).split("\\|").toSet);
+        }))
+      }
+      case None => None;
+    }
+
+    val inSilicoMin = if(inSilicoMinCt.isEmpty){
+      if(inSilicoKeysOpt.isEmpty) 0;
+      else inSilicoKeysOpt.get.size();
+    } else inSilicoMinCt.get;
     
     val txToGene : (String => String) = txToGeneFile match {
       case Some(f) => {
@@ -382,10 +412,8 @@ object CalcACMGVar {
             new VCFInfoHeaderLine(vcfCodes.assess_PM4, 1, VCFHeaderLineType.Integer,      "Protein length change in nonrepeat region OR stop-loss variant."),
             new VCFInfoHeaderLine(vcfCodes.assess_PM5, 1, VCFHeaderLineType.Integer,      "Novel missense variant change at amino acid where a different amino acid change is known pathogenic in ClinVar."),
             new VCFInfoHeaderLine(vcfCodes.assess_PP2, 1, VCFHeaderLineType.Integer,      "Missense variant in gene that is missense-sensitive (missense variants are at least 10pct of known pathogenic variants in clinvar)."),
-            new VCFInfoHeaderLine(vcfCodes.assess_PP3, 1, VCFHeaderLineType.Integer,      "Predicted to be damaging by at least "+inSilicoMin+" of the following in silico prediction algorithms: "+inSilicoKeys.map(_._1).mkString(",")),
             new VCFInfoHeaderLine(vcfCodes.assess_BP1, 1, VCFHeaderLineType.Integer,      "Missense variant in gene that is NOT missense-sensitive (less than 10pct of pathogenic variants are missense)"),
             new VCFInfoHeaderLine(vcfCodes.assess_BP3, 1, VCFHeaderLineType.Integer,      "In-frame indels in a repetitive region that does NOT overlap with any known domain."),
-            new VCFInfoHeaderLine(vcfCodes.assess_BP4, 1, VCFHeaderLineType.Integer,      "Predicted to be benign by at least "+inSilicoMin+" of the following in silico prediction algorithms: "+inSilicoKeys.map(_._1).mkString(",")),
             new VCFInfoHeaderLine(vcfCodes.assess_BP7, 1, VCFHeaderLineType.Integer,      "Synonymous variant that does NOT intersect with a conserved element region."),
             new VCFInfoHeaderLine(vcfCodes.assess_BA1,    1, VCFHeaderLineType.Integer,   "Allele frequency greater than 5 percent in one or more control dataset ("+ctrlAlleFreqKeys.mkString(",")+")"),
             new VCFInfoHeaderLine(vcfCodes.assess_RATING, 1, VCFHeaderLineType.String,    "ACMG Pathogenicity rating: PATHO - pathogenic. LPATH - likely pathogenic, VUS - variant, unknown significance, LB - likely benign, B - benign."),
@@ -397,7 +425,16 @@ object CalcACMGVar {
             new VCFInfoHeaderLine(vcfCodes.assess_exactMatchRS, 1, VCFHeaderLineType.String,   "RS number referring to pathogenic ClinVar variant that matches this variant exactly (or blank if there is no matching variant)."),
             new VCFInfoHeaderLine(vcfCodes.assess_aminoMatchRS, VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.String,   "List of RS numbers referring to pathogenic ClinVar variant(s) that match the amino acid change of this variant  (or blank if there is no matching variant)."),
             new VCFInfoHeaderLine(vcfCodes.assess_nearMatchRS,  VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.String,   "List of RS numbers referring to pathogenic ClinVar variant(s) that alter the same amino acid position, but change to a different amino acid  (or blank if there is no matching variant).")
-          );
+          ) ++ (
+            if(inSilicoKeysOpt.isDefined){
+              List[VCFInfoHeaderLine](
+                new VCFInfoHeaderLine(vcfCodes.assess_PP3, 1, VCFHeaderLineType.Integer,      "Predicted to be damaging by at least "+inSilicoMin+" of the following in silico prediction algorithms: "+inSilicoKeysOpt.get.map(_._1).mkString(",")),
+                new VCFInfoHeaderLine(vcfCodes.assess_BP4, 1, VCFHeaderLineType.Integer,      "Predicted to be benign by at least "+inSilicoMin+" of the following in silico prediction algorithms: "+inSilicoKeysOpt.get.map(_._1).mkString(","))
+              )
+            } else {
+              List[VCFInfoHeaderLine]()
+            }
+          )
             
       val newHeader = internalUtils.VcfTool.addHeaderLines(vcfHeader,newHeaderLines);
       reportln("Walking input VCF...","note")
@@ -413,8 +450,8 @@ object CalcACMGVar {
             locusIsConserved = locusIsConserved,
             locusIsHotspot = locusIsHotspot,
             ctrlAlleFreqKeys = ctrlAlleFreqKeys,
-            inSilicoKeys = inSilicoKeys,
-            inSilicoMinCt = inSilicoMinCt,
+            inSilicoKeysOpt = inSilicoKeysOpt,
+            inSilicoMin = inSilicoMin,
             BA1_AF = BA1_AF,
             PM2_AF = PM2_AF,
             clinVarVariantSet = clinVarVariantSet,
@@ -435,12 +472,9 @@ object CalcACMGVar {
                     locusIsHotspot    : (commonSeqUtils.GenomicInterval => Boolean) ,
                     ctrlAlleFreqKeys : Seq[String] = Seq("1KG_AF","ESP_EA_AF","ExAC_ALL","SWH_AF_GRP_CTRL"),
                     
-                    inSilicoKeys : Seq[(String,Set[String],Set[String])] = Vector[(String,Set[String],Set[String])](
-                        ("dbNSFP_MetaSVM_pred",Set[String]("D"),Set[String]("T"))//, //Includes predictors:   PolyPhen-2, SIFT, LRT, MutationTaster, Mutation Assessor, FATHMM, GERP++, PhyloP, SiPhy
-                        //("dbNSFP_PROVEAN_pred",Set[String]("D"))
-                    ),
-                    inSilicoMinCt : Int = -1, //-1 == ALL
-                    inSilicoToleratedCt : Int = 1,
+                    inSilicoKeysOpt : Option[Seq[(String,Set[String],Set[String])]],
+                    inSilicoMin : Int, //-1 == ALL
+                    //inSilicoToleratedCt : Int = 1,
                     
                     BA1_AF : Double = 0.05,
                     PM2_AF : Double = 0.0001,
@@ -455,7 +489,7 @@ object CalcACMGVar {
 
     var problemList = Set[String]();
     
-    val inSilicoMin = if(inSilicoMinCt == -1) inSilicoKeys.size else inSilicoMinCt;
+    //val inSilicoMin = if(inSilicoMinCt == -1) inSilicoKeys.size else inSilicoMinCt;
     
     val chrom = v.getContig();
     val pos = v.getStart();
@@ -623,7 +657,10 @@ object CalcACMGVar {
         val cvExactMatch = clinVarVariants(tx).exists{case (cvc,cvinfo,rsnum) => {cvinfo.start == info.start && cvinfo.subType == info.subType && cvinfo.pvar == info.pvar}};
         if(cvExactMatch){
           ps1 = ps1.merge(ACMGCrit("PS",1,true,Seq[String](tx + ":" + info.pvar)));
-          ps1RS = ps1RS ++ clinVarVariants(tx).filter{ case (cvc,cvinfo,rsnum) => {cvinfo.start == info.start && cvinfo.subType == info.subType && cvinfo.pvar == info.pvar}}.map(_._3).toSet;
+          val rsset = clinVarVariants(tx).filter{ case (cvc,cvinfo,rsnum) => {cvinfo.start == info.start && cvinfo.subType == info.subType && cvinfo.pvar == info.pvar}};
+          warning("Adding aminoMatch: rsnums:[\""+rsset.map(_._3).toSet.mkString("\",\"")+"\"] \n"+
+                  "                          [\""+rsset.map{case (cvc,cvinfo,rsnum) => { cvinfo.txid+":"+cvinfo.pvar+":"+rsnum }}.mkString("\",\"")+"\"]","addAminoMatchRS",50);
+          ps1RS = ps1RS ++ rsset.map(_._3).toSet
         } else if(info.subType == "swapAA"){
             val partialMatch = clinVarVariants(tx).filter{case (cvc,cvinfo,rsnum) => {cvinfo.subType == "swapAA" && cvinfo.start == info.start && cvinfo.altAA != info.altAA}};
             if(partialMatch.size > 0){
@@ -654,134 +691,138 @@ object CalcACMGVar {
       //val numSplit = v.getAttributeAsInt(vcfCodes.numSplit_TAG,1);
       val rawAlles = v.getAttributeAsList(vcfCodes.splitAlle_TAG).map(_.toString());
       
-      val isBadFlag = if(alt.getBaseString().length > 1){
-        false;
-      } else if(numSplit == 1){
-        var warn : Seq[String] = Seq[String]();
-        inSilicoKeys.count{case (key,damSet,safeSet) => {
-          val xraw = v.getAttributeAsList(key);
-          if(xraw.length == 1){
-            damSet.contains(xraw.head.toString());
-          } else if(xraw.length == 0){
-            false;
-          } else {
-            warning("One known allele, multiple InSilico fields for key: "+key+"\n"+"line:\n   "+v.toString(), "maybeAmbigInSilicoWarning", limit = 25);
-            problemList = problemList + "IS|inSilicoAlleleMismatch1"
-            xraw.map(_.toString()).exists(damSet.contains(_));
+      
+      if(inSilicoKeysOpt.isDefined){
+        val inSilicoKeys = inSilicoKeysOpt.get;
+        
+        val isBadFlag = if(alt.getBaseString().length > 1){
+          false;
+        } else if(numSplit == 1){
+          var warn : Seq[String] = Seq[String]();
+          inSilicoKeys.count{case (key,damSet,safeSet) => {
+            val xraw = v.getAttributeAsList(key);
+            if(xraw.length == 1){
+              damSet.contains(xraw.head.toString());
+            } else if(xraw.length == 0){
+              false;
+            } else {
+              warning("One known allele, multiple InSilico fields for key: "+key+"\n"+"line:\n   "+v.toString(), "maybeAmbigInSilicoWarning", limit = 25);
+              problemList = problemList + "IS|inSilicoAlleleMismatch1"
+              xraw.map(_.toString()).exists(damSet.contains(_));
+            }
+          }} >= inSilicoMin;
+        } else {
+          val inSilicoRaw = inSilicoKeys.map{case (key,damSet,safeSet) => {
+            v.getAttributeAsList(key).toList;
+          }}
+          if(rawAlles.length != numSplit){
+            //warning("", "", limit = 25);
+            error("Incompatible VCF INFO values for tags "+vcfCodes.numSplit_TAG +" and " +vcfCodes.splitAlle_TAG+"!\n"+
+                  "numSplit = "+numSplit+"\n"+
+                  "rawAlles = "+rawAlles.mkString(",")+"\n"
+            );
           }
-        }} >= inSilicoMin;
-      } else {
-        val inSilicoRaw = inSilicoKeys.map{case (key,damSet,safeSet) => {
-          v.getAttributeAsList(key).toList;
-        }}
-        if(rawAlles.length != numSplit){
-          //warning("", "", limit = 25);
-          error("Incompatible VCF INFO values for tags "+vcfCodes.numSplit_TAG +" and " +vcfCodes.splitAlle_TAG+"!\n"+
-                "numSplit = "+numSplit+"\n"+
-                "rawAlles = "+rawAlles.mkString(",")+"\n"
-          );
-        }
-        if(splitIdx >= numSplit){
-          error("Incompatible VCF INFO values for tags "+vcfCodes.numSplit_TAG +" and " +vcfCodes.splitIdx_TAG+"!\n"+
-                "numSplit = "+numSplit+"\n"+
-                "splitIdx = "+splitIdx+"\n"
-          );
-        }
-        val keepAlles = rawAlles.zipWithIndex.filter{case (a,i) =>{
-          a.length == 1
-        }}
-        keepAlles.zipWithIndex.find{case ((a,oldidx),newidx) => {
-          oldidx == splitIdx;
-        }} match {
-          case Some(((a,oldidx),newidx)) => {
-            inSilicoKeys.count{case (key,damSet,safeSet) => {
-                val xraw = v.getAttributeAsList(key);
-                if(xraw.length == keepAlles.length){
-                  damSet.contains(xraw(newidx).toString());
-                } else if(xraw.length == 0){
-                  false;
-                } else {
-                  problemList = problemList + "IS|inSilicoAlleleMismatch2"
-                  warning("Multiple known alleles, wrong # of InSilico fields for key: "+key+"\n"+""+
-                          "Alt alleles (in order) = "+Range(0,v.getNAlleles()-1).map((a) => v.getAlternateAllele(a)).map(_.getBaseString()).mkString(",")+", rawAlles="+rawAlles.mkString(",")+", InSilico("+key+")="+xraw.map(_.toString()).mkString(",")+"\n"+
-                          "line:\n"+v.toString(), "ambigInSilicoWarning", limit = 100);
-                  false;
-                }
-            }} >= inSilicoMin;
+          if(splitIdx >= numSplit){
+            error("Incompatible VCF INFO values for tags "+vcfCodes.numSplit_TAG +" and " +vcfCodes.splitIdx_TAG+"!\n"+
+                  "numSplit = "+numSplit+"\n"+
+                  "splitIdx = "+splitIdx+"\n"
+            );
           }
-          case None => {
-            false;
+          val keepAlles = rawAlles.zipWithIndex.filter{case (a,i) =>{
+            a.length == 1
+          }}
+          keepAlles.zipWithIndex.find{case ((a,oldidx),newidx) => {
+            oldidx == splitIdx;
+          }} match {
+            case Some(((a,oldidx),newidx)) => {
+              inSilicoKeys.count{case (key,damSet,safeSet) => {
+                  val xraw = v.getAttributeAsList(key);
+                  if(xraw.length == keepAlles.length){
+                    damSet.contains(xraw(newidx).toString());
+                  } else if(xraw.length == 0){
+                    false;
+                  } else {
+                    problemList = problemList + "IS|inSilicoAlleleMismatch2"
+                    warning("Multiple known alleles, wrong # of InSilico fields for key: "+key+"\n"+""+
+                            "Alt alleles (in order) = "+Range(0,v.getNAlleles()-1).map((a) => v.getAlternateAllele(a)).map(_.getBaseString()).mkString(",")+", rawAlles="+rawAlles.mkString(",")+", InSilico("+key+")="+xraw.map(_.toString()).mkString(",")+"\n"+
+                            "line:\n"+v.toString(), "ambigInSilicoWarning", limit = 100);
+                    false;
+                  }
+              }} >= inSilicoMin;
+            }
+            case None => {
+              false;
+            }
           }
         }
+        val isOkFlag = if(alt.getBaseString().length > 1){
+          false;
+        } else if(numSplit == 1){
+          var warn : Seq[String] = Seq[String]();
+          inSilicoKeys.count{case (key,damSet,safeSet) => {
+            val xraw = v.getAttributeAsList(key);
+            if(xraw.length == 1){
+              safeSet.contains(xraw.head.toString());
+            } else if(xraw.length == 0){
+              false;
+            } else {
+               problemList = problemList + "IS|inSilicoAlleleMismatch1"
+               warning("One known allele, wrong # of InSilico fields for key: "+key+"\n"+""+
+                       "Alt alleles (in order) = "+Range(0,v.getNAlleles()-1).map((a) => v.getAlternateAllele(a)).map(_.getBaseString()).mkString(",")+", rawAlles="+rawAlles.mkString(",")+", InSilico("+key+")="+xraw.map(_.toString()).mkString(",")+"\n"+
+                       "line:\n"+v.toString(), "maybeAmbigInSilicoWarning", limit = 100);
+              //warning("One known allele, multiple InSilico fields for key: "+key+"\n"+"line:\n   "+v.toString(), "maybeAmbigInSilicoWarning", limit = 25);
+              xraw.map(_.toString()).exists(safeSet.contains(_));
+            }
+          }} >= inSilicoMin;
+        } else {
+          val inSilicoRaw = inSilicoKeys.map{case (key,damSet,safeSet) => {
+            v.getAttributeAsList(key).toList;
+          }}
+          if(rawAlles.length != numSplit){
+            //warning("", "", limit = 25);
+            error("Incompatible VCF INFO values for tags "+vcfCodes.numSplit_TAG +" and " +vcfCodes.splitAlle_TAG+"!\n"+
+                  "numSplit = "+numSplit+"\n"+
+                  "rawAlles = "+rawAlles.mkString(",")+"\n"
+            );
+          }
+          if(splitIdx >= numSplit){
+            error("Incompatible VCF INFO values for tags "+vcfCodes.numSplit_TAG +" and " +vcfCodes.splitIdx_TAG+"!\n"+
+                  "numSplit = "+numSplit+"\n"+
+                  "splitIdx = "+splitIdx+"\n"
+            );
+          }
+          val keepAlles = rawAlles.zipWithIndex.filter{case (a,i) =>{
+            a.length == 1
+          }}
+          keepAlles.zipWithIndex.find{case ((a,oldidx),newidx) => {
+            oldidx == splitIdx;
+          }} match {
+            case Some(((a,oldidx),newidx)) => {
+              inSilicoKeys.count{case (key,damSet,safeSet) => {
+                  val xraw = v.getAttributeAsList(key);
+                  if(xraw.length == keepAlles.length){
+                    safeSet.contains(xraw(newidx).toString());
+                  } else if(xraw.length == 0){
+                    false;
+                  } else {
+                    problemList = problemList + "IS|inSilicoAlleleMismatch2"
+                    warning("Multiple known alleles, wrong # of InSilico fields for key: "+key+"\n"+"line:\n   "+v.toString(), "ambigInSilicoWarning", limit = 25);
+                    false;
+                  }
+              }} >= inSilicoMin;
+            }
+            case None => {
+              false;
+            }
+          }
+        }
+        
+        vb = vb.attribute(vcfCodes.assess_PP3, if(isBadFlag) "1" else "0" );
+        vb = vb.attribute(vcfCodes.assess_BP4, if(isOkFlag) "1" else "0" );
+        
+        crits.addCrit(new ACMGCrit("PP",3,isBadFlag,Seq[String]()));
+        crits.addCrit(new ACMGCrit("BP",4,isOkFlag,Seq[String]()));
       }
-      val isOkFlag = if(alt.getBaseString().length > 1){
-        false;
-      } else if(numSplit == 1){
-        var warn : Seq[String] = Seq[String]();
-        inSilicoKeys.count{case (key,damSet,safeSet) => {
-          val xraw = v.getAttributeAsList(key);
-          if(xraw.length == 1){
-            safeSet.contains(xraw.head.toString());
-          } else if(xraw.length == 0){
-            false;
-          } else {
-             problemList = problemList + "IS|inSilicoAlleleMismatch1"
-             warning("One known allele, wrong # of InSilico fields for key: "+key+"\n"+""+
-                     "Alt alleles (in order) = "+Range(0,v.getNAlleles()-1).map((a) => v.getAlternateAllele(a)).map(_.getBaseString()).mkString(",")+", rawAlles="+rawAlles.mkString(",")+", InSilico("+key+")="+xraw.map(_.toString()).mkString(",")+"\n"+
-                     "line:\n"+v.toString(), "maybeAmbigInSilicoWarning", limit = 100);
-            //warning("One known allele, multiple InSilico fields for key: "+key+"\n"+"line:\n   "+v.toString(), "maybeAmbigInSilicoWarning", limit = 25);
-            xraw.map(_.toString()).exists(safeSet.contains(_));
-          }
-        }} >= inSilicoToleratedCt;
-      } else {
-        val inSilicoRaw = inSilicoKeys.map{case (key,damSet,safeSet) => {
-          v.getAttributeAsList(key).toList;
-        }}
-        if(rawAlles.length != numSplit){
-          //warning("", "", limit = 25);
-          error("Incompatible VCF INFO values for tags "+vcfCodes.numSplit_TAG +" and " +vcfCodes.splitAlle_TAG+"!\n"+
-                "numSplit = "+numSplit+"\n"+
-                "rawAlles = "+rawAlles.mkString(",")+"\n"
-          );
-        }
-        if(splitIdx >= numSplit){
-          error("Incompatible VCF INFO values for tags "+vcfCodes.numSplit_TAG +" and " +vcfCodes.splitIdx_TAG+"!\n"+
-                "numSplit = "+numSplit+"\n"+
-                "splitIdx = "+splitIdx+"\n"
-          );
-        }
-        val keepAlles = rawAlles.zipWithIndex.filter{case (a,i) =>{
-          a.length == 1
-        }}
-        keepAlles.zipWithIndex.find{case ((a,oldidx),newidx) => {
-          oldidx == splitIdx;
-        }} match {
-          case Some(((a,oldidx),newidx)) => {
-            inSilicoKeys.count{case (key,damSet,safeSet) => {
-                val xraw = v.getAttributeAsList(key);
-                if(xraw.length == keepAlles.length){
-                  safeSet.contains(xraw(newidx).toString());
-                } else if(xraw.length == 0){
-                  false;
-                } else {
-                  problemList = problemList + "IS|inSilicoAlleleMismatch2"
-                  warning("Multiple known alleles, wrong # of InSilico fields for key: "+key+"\n"+"line:\n   "+v.toString(), "ambigInSilicoWarning", limit = 25);
-                  false;
-                }
-            }} >= inSilicoToleratedCt;
-          }
-          case None => {
-            false;
-          }
-        }
-      }
-      
-      vb = vb.attribute(vcfCodes.assess_PP3, if(isBadFlag) "1" else "0" );
-      vb = vb.attribute(vcfCodes.assess_BP4, if(isOkFlag) "1" else "0" );
-      
-      crits.addCrit(new ACMGCrit("PP",3,isBadFlag,Seq[String]()));
-      crits.addCrit(new ACMGCrit("BP",4,isOkFlag,Seq[String]()));
-      
       //******************************* BP7: Synonymous w/ no splice impact, not highly conserved:
       val bp7flag = (! isConserved) && combo.forall{case (g,tx,info,c,i) => {
         info.severityType == "SYNON" || info.severityType == "PSYNON" || info.severityType == "UNK"
@@ -832,6 +873,7 @@ object CalcACMGVar {
     reportln("Starting VCF read/write...","progress");
     for(v <- vcIter){
       try {
+      val rsnum = v.getAttributeAsString("RS","unknownRSNUM") //v.getID();
       val refAlle = v.getReference();
       val altAlleles = Range(0,v.getNAlleles()-1).map((a) => v.getAlternateAllele(a));
       //val vTypesList = v.getAttributeAsList(vcfCodes.vType_TAG).toVector.map(_.toString.split(vcfCodes.delims(1)).toVector);
@@ -842,9 +884,7 @@ object CalcACMGVar {
       val chrom = v.getContig();
       
       val vMutGList = v.getAttributeAsList(vcfCodes.vMutG_TAG).toVector.filter(_ != ".");
-      vMutGList.foreach(g => {
-        gset(chrom + ":" + g) = v.getID();
-      })
+
       
       val vMutInfoList = if(txList.length > 0) {
           v.getAttributeAsList(vcfCodes.vMutINFO_TAG).toVector.map( (attrObj) => {
@@ -854,8 +894,8 @@ object CalcACMGVar {
           //reportln("vMutInfoListDebug: attrSplit["+attrSplit.length+"] = [\""+attrSplit.mkString("\", \"")+"\"]","debug");
           
           attrSplit.map(x => {
-            internalUtils.TXUtil.getPvarInfoFromString(x)
-          }) 
+            internalUtils.TXUtil.getPvarInfoFromString(x, ID = rsnum);
+          })
         })
       } else {
         Vector();
@@ -865,6 +905,11 @@ object CalcACMGVar {
       
       if(txList.length > 0) { 
         for((alle,altIdx) <- altAlleles.zipWithIndex){
+          
+      //vMutGList.foreach(g => {
+      //  gset(chrom + ":" + g) = rsnum;
+      //})
+           
            //val vTypes = vTypesList(altIdx);
            //val vMutP = vMutPList(altIdx);
            val vMutC = vMutCList(altIdx);
@@ -879,8 +924,9 @@ object CalcACMGVar {
            if(hasPatho && (! hasBenign)){
              for(i <- Range(0,txList.length)){
                val tx = txList(i);
-               out(tx) = out(tx) + ((vMutC(i),vInfo(i),v.getID()));
+               out(tx) = out(tx) + ((vMutC(i),vInfo(i),rsnum));
              }
+             gset(chrom + ":" + vMutGList(altIdx)) = rsnum;
            }
         }
       }
@@ -893,6 +939,15 @@ object CalcACMGVar {
         }
       }
     }
+    
+    out.keySet.toVector.slice(0,10).foreach(tx => {
+      val varSeq = out(tx);
+      reportln("Example ClinVar TX: "+tx,"debug");
+      varSeq.slice(0,10).foreach{ case (cvc,info,rsnum) => {
+        reportln("      " + info.txid + ":" + info.pvar + ":"+rsnum,"debug");
+      }}
+    })
+    
     return (gset,out);
   }
   
