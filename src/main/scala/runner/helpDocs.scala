@@ -96,7 +96,7 @@ object helpDocs {
    
   def getGeneralHelp : String = {
       val sb = new StringBuilder("");
-      sb.append("CurrentlyUntitledUtility\n")
+      sb.append(runner.UTILITY_TITLE+"\n")
       sb.append("version: " + runner.UTIL_VERSION + "\n");
       sb.append("\n");
       //sb.append("SYNOPSIS\n");
@@ -133,7 +133,7 @@ object helpDocs {
   def writeMarkdownHelp(outdir : String) {
     
       val sb = new StringBuilder("");
-      sb.append("# QoRTs: Quality Of Rna-seq Tool Set\n");
+      sb.append("# "+runner.UTILITY_TITLE+"\n");
       sb.append("> Version" + runner.UTIL_VERSION + " (Updated " + runner.UTIL_COMPILE_DATE +")\n\n");
       sb.append("> ([back to help base](../index.html))\n\n");
       sb.append("## General Help\n\n");

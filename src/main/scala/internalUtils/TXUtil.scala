@@ -914,16 +914,22 @@ object TXUtil {
     
     //TO DO: switch this over to case class enums?
   }
+  //CLNSIG: 0 - Uncertain significance, 1 - not provided, 2 - Benign, 3 - Likely benign, 4 - Likely pathogenic, 5 - Pathogenic, 6 - drug response, 7 - histocompatibility, 255 - other
 
   //pVariantInfo(txid, start, end, alt, varTypes : Seq[String])
-  case class pVariantInfo(txid : String, pvar : String, start : Int, end : Int, altAA : String, cType : String, severityType : String, pType : String, subType : String, ID : String = ""){
+  case class pVariantInfo(txid : String, pvar : String, start : Int, end : Int, altAA : String, cType : String, severityType : String, pType : String, subType : String, ID : String = "", CLNSIG : Int = 1, RAWCLNSIG : String = ""){
     lazy val isSwap : Boolean = subType == "swapAA";
     lazy val varType : String = cType + "_" + severityType + "_" + pType +"_"+subType;
     def saveToString(delim : String = "/") : String = {
       txid + delim + pvar + delim + start + delim + end + delim + altAA + delim + cType + delim + severityType + delim + pType + delim + subType;
     }
+    
+    def isPatho : Boolean = {
+      return (CLNSIG == 4 || CLNSIG == 5)
+    }
+    
   }
-  def getPvarInfoFromString(str : String, delim : String = "/", ID : String = "") : pVariantInfo = {
+  def getPvarInfoFromString(str : String, delim : String = "/", ID : String = "", CLNSIG : Int = 1, RAWCLNSIG : String = "") : pVariantInfo = {
     val cells = str.split(delim,-1);
     if(cells.length != 9){
       error("Error: pVariantInfo unpack: supplied string is malformatted: length = "+cells.length+"\n Supplied String=\""+str+"\"\ncells = [\""+cells.mkString("\",\"")+"\"]");
@@ -937,7 +943,9 @@ object TXUtil {
                  severityType = cells(6), 
                  pType = cells(7), 
                  subType = cells(8),
-                 ID = ID);
+                 ID = ID,
+                 CLNSIG = CLNSIG,
+                 RAWCLNSIG = RAWCLNSIG);
     
   }
   

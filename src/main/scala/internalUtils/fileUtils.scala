@@ -24,6 +24,34 @@ import internalUtils.Reporter._;
 object fileUtils {
   
   /*
+   * Helpers:
+   */
+  
+  def getTableFromLines(lines : Iterator[String],colNames : Seq[String], errorName : String = "", delim : String = "\t", stripHash : Boolean = true) : Iterator[Seq[String]] = {
+    if(! lines.hasNext()){
+      error("Bad input: No lines found in "+ errorName);
+    }
+    val headerLine = lines.next();
+    val headerCells = if(stripHash && headerLine.head == '#'){
+      headerLine.tail.split(delim).toVector;
+    } else {
+      headerLine.split(delim).toVector;
+    }
+    
+    val colNums = colNames.map(c => {
+      if(! headerCells.contains(c)){
+        error("Bad Input: Column \""+c+"\" not found in "+errorName);
+      }
+      headerCells.indexOf(c);
+    }).toVector;
+    
+    return lines.map(line => {
+      val cells = line.split(delim);
+      colNums.map(i => cells(i))
+    })
+  }
+  
+  /*
    * Bottom-level output commands:
    */
   

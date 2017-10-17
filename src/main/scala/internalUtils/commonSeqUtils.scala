@@ -805,38 +805,8 @@ object commonSeqUtils {
   //def samRecordPairIterator_allPossibleSituations(iter : Iterator[SAMRecord], attr : SamFileAttributes, verbose : Boolean = true, testCutoff : Int = Int.MaxValue) : Iterator[(SAMRecord,SAMRecord)] = {
     
   //}
-  
-  def samRecordPairIterator_unsorted(iter : Iterator[SAMRecord], verbose : Boolean = true, testCutoff : Int = -1, ignoreSecondary : Boolean = true) : Iterator[(SAMRecord,SAMRecord)] = {
 
-    if(ignoreSecondary){
-       presetProgressReporters.wrapIterator_readPairs(getSRPairIterUnsorted(iter.filter((read : SAMRecord) => {
-           (! read.getNotPrimaryAlignmentFlag()) && (! getMateUnmappedFlag(read)) && (! read.getReadUnmappedFlag())
-         })), verbose, testCutoff);
-    } else {
-      error("FATAL ERROR: Using non-primary read mappings is not currently implemented!");
-      return null;
-    }
-  }
-  def samRecordPairIterator_withMulti(iter : Iterator[SAMRecord], verbose : Boolean = true, testCutoff : Int = -1, ignoreSecondary : Boolean = true) : Iterator[(SAMRecord,SAMRecord)] = {
-    if(ignoreSecondary){
-      presetProgressReporters.wrapIterator_readPairs(getSRPairIter(iter.filter((read : SAMRecord) => {
-        (! read.getNotPrimaryAlignmentFlag()) && (! getMateUnmappedFlag(read)) && (! read.getReadUnmappedFlag())
-      })), verbose, testCutoff);
-    } else {
-      error("FATAL ERROR: Using non-primary read mappings is not currently implemented!");
-      return null;
-    }
-  }
-  def samRecordPairIterator_withMulti_singleEnd(iter : Iterator[SAMRecord], verbose : Boolean = true, testCutoff : Int = -1, ignoreSecondary : Boolean = true) : Iterator[(SAMRecord,SAMRecord)] = {
-    if(ignoreSecondary){
-      presetProgressReporters.wrapIterator_readPairs(getSRPairIter_singleEnd(iter.filter((read : SAMRecord) =>{
-        (! read.getNotPrimaryAlignmentFlag()) & (! read.getReadUnmappedFlag())
-      })), verbose, testCutoff);
-    } else {
-      error("FATAL ERROR: Using non-primary read mappings is not currently implemented!");
-      return null;
-    }
-  }
+  
   
   
   // Feature Removed!
@@ -882,80 +852,7 @@ object commonSeqUtils {
       return null;
     }
   }*/
-  
-  private def getSRPairIter_singleEnd(iter : Iterator[SAMRecord]) : Iterator[(SAMRecord,SAMRecord)] = {
-    return iter.map( (next : SAMRecord) => (next,next) );
-  }
-  
-  private def getSRPairIter(iter : Iterator[SAMRecord]) : Iterator[(SAMRecord,SAMRecord)] = {
-    return new  Iterator[(SAMRecord,SAMRecord)] {
-      def hasNext : Boolean = iter.hasNext;
-      def next : (SAMRecord,SAMRecord) = {
-        val rA = iter.next;
-        val rB = iter.next;
-        if(rA.getReadName != rB.getReadName){
-          error("FATAL ERROR: SAMRecord is improperly paired! Is the file sorted by name?\n"+
-                "    Offending reads: "+rA.getReadName + " != " + rB.getReadName +"\n"+
-                "If the file is not sorted by name then you should included the '--coordSorted' parameter.\n"+
-                "(Note: in coordSorted mode it is highly recommended but not actually required that the file be sorted by position)\n"+
-                "This problem could also have a number of other causes: if there are orphaned reads that aren't marked as such in the sam flags, for example."
-                );
-        }
-        if(rA.getFirstOfPairFlag) return( (rA,rB) );
-        else return( (rB,rA) );
-      }
-    }
-  }
-  
-  private def getSRPairIterUnsorted(iter : Iterator[SAMRecord]) : Iterator[(SAMRecord,SAMRecord)] = {
-    val initialPairContainerWarningSize = 100000;
-    val warningSizeMultiplier = 2;
-    
-    return new Iterator[(SAMRecord,SAMRecord)] {
-      val pairContainer = scala.collection.mutable.AnyRefMap[String,SAMRecord]();
-      //NOTE: The above container type should never contain more than 500 million reads. If this is a problem, then something is terribly wrong.
-      var pairContainerWarningSize = initialPairContainerWarningSize;
-      
-      def hasNext : Boolean = iter.hasNext;
-      def next : (SAMRecord,SAMRecord) = {
-        var curr = iter.next;
-        
-        while((! pairContainer.contains(curr.getReadName())) && iter.hasNext) {
-          pairContainer(curr.getReadName()) = curr;
-          if(pairContainerWarningSize < pairContainer.size){
-              reportln("NOTE: Unmatched Read Buffer Size > "+pairContainerWarningSize+" [Mem usage:"+MemoryUtil.memInfo+"]","note");
-              if(pairContainerWarningSize == initialPairContainerWarningSize){
-                reportln("    (This is generally not a problem, but if this increases further then OutOfMemoryExceptions\n"+
-                         "    may occur.\n"+
-                         "    If memory errors do occur, either increase memory allocation or sort the bam-file by name\n"+
-                         "    and rerun with the '--nameSorted' option.\n"+
-                         "    This might also indicate that your dataset contains an unusually large number of\n"+
-                         "    chimeric read-pairs. Or it could occur simply due to the presence of genomic\n"+
-                         "    loci with extremly high coverage. It may also indicate a SAM/BAM file that \n"+
-                         "    does not adhere to the standard SAM specification.)", "note");
-              }
-              pairContainerWarningSize = pairContainerWarningSize * warningSizeMultiplier;
-          }
-          curr = iter.next;
-        }
-        
-        if(! pairContainer.contains(curr.getReadName()) ){
-          internalUtils.Reporter.error("ERROR ERROR ERROR: Reached end of bam file, there are "+(pairContainer.size+1)+" orphaned reads, which are marked as having a mapped pair, but no corresponding pair is found in the bam file. \n(Example Orphaned Read Name: "+curr.getReadName()+")");
-        }
 
-        
-        val rB = pairContainer.remove(curr.getReadName()).get;
-        if(curr.getFirstOfPairFlag()) return((curr, rB));
-        else return((rB, curr));
-      }
-    }
-  }
-  
-  
-  def samRecordPairIterator(iter : Iterator[SAMRecord], verbose : Boolean = true, testCutoff : Int = -1) : Iterator[(SAMRecord,SAMRecord)] = {
-    presetProgressReporters.wrapIterator_readPairs(getSRPairIter(iter), verbose, testCutoff);
-  }
-  
   def getStrand(r : SAMRecord, stranded : Boolean, fr_secondStrand : Boolean) : Char = {
     if(! stranded){
       return '.'

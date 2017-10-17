@@ -113,6 +113,22 @@ object stdUtils {
   /**************************************************************************************************************************
    * Specialty:
    **************************************************************************************************************************/
+  def circularIterator[A]( lst : Seq[A] ) : Iterator[A] = {
+    new Iterator[A] {
+      var i = 0;
+      def next : A = {
+        if(i < lst.length){
+          i = i + 1
+          lst(i-1);
+        } else {
+          i = 1;
+          lst(0);
+        }
+      }
+      def hasNext = true;
+    }
+  }
+  
   
   def calculateGeometricSizeFactorsForMatrix(m : Seq[Seq[Int]], verbose : Boolean = true) : Vector[Double] = {
     if(verbose) reportln(">   Calculating size factors","debug");
@@ -253,6 +269,83 @@ object stdUtils {
    * Sequence/iterator utilities:
    **************************************************************************************************************************/
 
+  def groupBySpan_OLD[A,B](iter : Iterator[A])(f : (A => B)) : Iterator[Vector[A]] = {
+    var currIter = iter;
+    
+    return new Iterator[Vector[A]]{
+      def hasNext : Boolean = currIter.hasNext;
+      def next : Vector[A] = {
+        val nextA = currIter.next;
+        val nextB = f(nextA);
+        val (curr,remain) = currIter.span(c => f(c) == nextB);
+        val out = nextA +: curr.toVector;
+        currIter = remain;
+        out;
+      }
+    }
+  }
+  
+  def groupBySpan[A,B](iter : BufferedIterator[A])(f : (A => B)) : Iterator[Seq[A]] = {
+    //var currIter = iter;
+    return new Iterator[Seq[A]]{
+      def hasNext : Boolean = iter.hasNext;
+      def next : Seq[A] = {
+        //val nextA = currIter.next;
+        val nextB = f(iter.head);
+        extractWhile(iter)(a => f(a) == nextB)
+      }
+    }
+  }
+  def extractWhile[A](iter : BufferedIterator[A])(f : (A => Boolean)) : Vector[A] = {
+      var out = scala.collection.mutable.Queue[A]();
+      while(iter.hasNext && f(iter.head)){
+        out += iter.next;
+      }
+      return out.toVector;
+  }
+  def skipWhile[A](iter : BufferedIterator[A])(f : (A => Boolean)){
+    while(iter.hasNext && f(iter.head)){
+      iter.next;
+    }
+  }
+  
+  /*def groupBySpan_OLD[A,B](iter : Iterator[A])(f : (A => B)) : Iterator[Seq[A]] = {
+    var currIter = iter;
+    
+    return new Iterator[Seq[A]]{
+      def hasNext : Boolean = currIter.hasNext;
+      def next : Seq[A] = {
+        val nextA = currIter.next;
+        val nextB = f(nextA);
+        val (curr,remain) = spanVector(currIter)(c => f(c) == nextB);
+        val out = nextA +: curr;
+        currIter = remain;
+        out;
+      }
+    }
+  }*/
+  def spanVector_OLD[A](iter : Iterator[A])(f : (A => Boolean)) : (Vector[A],Iterator[A]) = {
+    if(iter.hasNext){
+      var out = Vector[A]();
+      var curr = iter.next;
+      if(f(curr)){
+          out = out :+ curr;
+      }
+      while(iter.hasNext && f(curr)){
+        curr = iter.next;
+        if(f(curr)){
+          out = out :+ curr;
+        }
+      }
+      if(f(curr)){
+        return (out,iter);
+      } else {
+        return (out,Iterator(curr) ++ iter);
+      }
+    } else {
+      return (Vector[A](),iter);
+    }
+  }
   
   object AlphabetOrderingChar extends Ordering[Char] {
     def compare(x : Char, y : Char) : Int = {
@@ -529,33 +622,50 @@ object stdUtils {
       }
     }
   }
-  
-  case class AdvancedIteratorProgressReporter_ThreeLevelAuto[A](elementTitle : String = "lines", lineSec : Int = 300,
+  case class AdvancedIteratorProgressReporter_ThreeLevelAuto_OLD[A](elementTitle : String = "lines", lineSec : Int = 300,
                                                                  reportFunction : ((A,Int) => String) = ((a : A,i : Int) => "")) extends AdvancedIteratorProgressReporter[A]  {
     var accel = 1;
     var space = "x";
     val accelFactor : Int = 10
+    val accelFactors : Iterator[Float] = circularIterator(Seq(2.0.toFloat,2.5.toFloat,2.0.toFloat));
     var dotThreshold : Int = 1
     var dotSpaceThreshold : Int = 5
     var dotNewlineThreshold : Int = 20
     
     var lastLineTime = System.nanoTime();
+    var lastLineLen = 1.0;
     var i = 1;
     
+    def bufferProgressBar(bufferChar : String = "x"){
+        val numX = (i % dotNewlineThreshold) / dotThreshold;
+        val numSpaces = numX / 5;
+        val numFinalX = numX % 5;
+        space = repString("xxxxx ",numSpaces) + repString("x",numFinalX);
+        
+    }
+    
     def reportProgress(iterCt : Int, a : A){
+      i = iterCt;
       if(iterCt % dotThreshold == 0){ 
         if(iterCt % dotSpaceThreshold == 0) { 
           if(iterCt % dotNewlineThreshold == 0){ 
             val currTime = System.nanoTime();
             val elapsedSec = (currTime - lastLineTime) / 1000000000;
-            val accelerate = elapsedSec < lineSec;
+            val accelerate = elapsedSec.toDouble / lastLineLen < lineSec;
             space = "";
             if(accelerate){
-              accel = accel * accelFactor;
-              dotThreshold        = dotThreshold  * accelFactor;
-              dotSpaceThreshold   = dotSpaceThreshold  * accelFactor;
-              dotNewlineThreshold = dotNewlineThreshold * accelFactor;
-              space = repString("x",(iterCt % dotNewlineThreshold) / dotThreshold);
+              //accel = accel * accelFactor;
+              dotThreshold = math.round(dotThreshold.toFloat * accelFactors.next)
+              dotSpaceThreshold = dotThreshold * 5;
+              dotNewlineThreshold = dotThreshold * 20;
+              //dotThreshold        = dotThreshold  * accelFactor;
+              //dotSpaceThreshold   = dotSpaceThreshold  * accelFactor;
+              //dotNewlineThreshold = dotNewlineThreshold * accelFactor;
+              val numX = (iterCt % dotNewlineThreshold) / dotThreshold;
+              lastLineLen = (20-numX).toDouble / 20.toDouble;
+              val numSpaces = numX / 5;
+              val numFinalX = numX % 5;
+              space = repString("xxxxx ",numSpaces) + repString("x",numFinalX);
             }
             lastLineTime = currTime;
             report(".["+iterCt+" "+elementTitle+" processed] [Time: "+getDateAndTimeString+"] ("+elapsedSec+"s)"+reportFunction(a,iterCt)+"\n"+
@@ -564,6 +674,70 @@ object stdUtils {
           } else report(". ","progress");
         } else { 
           report(".","progress");
+        }
+      }
+    }
+  }
+  
+  case class AdvancedIteratorProgressReporter_ThreeLevelAuto[A](elementTitle : String = "lines", lineSec : Int = 60,
+                                                                 reportFunction : ((A,Int) => String) = ((a : A,i : Int) => "")) extends AdvancedIteratorProgressReporter[A]  {
+    var accel = 1;
+    var space = "x";
+    val accelFactor : Int = 10
+    val accelFactors : Iterator[Float] = circularIterator(Seq(2.0.toFloat,2.5.toFloat,2.0.toFloat));
+    var dotThreshold : Int = 1
+    var dotSpaceThreshold : Int = 5
+    var dotNewlineThreshold : Int = 20
+    
+    var lastLineTime = System.nanoTime();
+    var lastLineLen = 1.0;
+    var i = 1;
+    
+    var lastLineNum = 20;
+    
+    def bufferProgressBar(bufferChar : String = "x"){
+        val numX = (i % dotNewlineThreshold) / dotThreshold;
+        val numSpaces = numX / 5;
+        val numFinalX = numX % 5;
+        space = repString("xxxxx ",numSpaces) + repString("x",numFinalX);
+    }
+    
+    def reportProgress(iterCt : Int, a : A){
+      i = iterCt;
+      if(iterCt % dotThreshold == 0){ 
+        val numX = if(i % dotNewlineThreshold == 0) 20 else (i % dotNewlineThreshold) / dotThreshold;
+        progressDot(i = numX, dotsPerGroup = 5, groupsPerLine = 4, blankSpacer = "-", verb = "progress");
+        
+        if(iterCt % dotNewlineThreshold == 0){ 
+            val currTime = System.nanoTime();
+            val elapsedSec = (currTime - lastLineTime) / 1000000000;
+            val elapsedMillis = (currTime - lastLineTime) / 1000000;
+            val elapsedMilliString = zeroPad(  (elapsedMillis % 1000).toInt, cols = 3);
+            val linesPerSec   = (lastLineNum.toDouble) / (elapsedMillis.toDouble / 1000.toDouble);
+            
+            val speedString = if(linesPerSec < 10){
+              val linesPerMin = (lastLineNum * 60).toDouble / (elapsedMillis.toDouble / 1000.toDouble);
+              ((math.rint(linesPerMin * 100)) / 100) +" "+elementTitle+ " per min";
+            } else if(linesPerSec < 1000){
+              ((math.rint(linesPerSec * 100)) / 100) +" "+elementTitle+ " per sec";
+            } else {
+              math.round(linesPerSec) +" "+elementTitle+ " per sec";
+            }
+            val accelerate = elapsedSec.toDouble / lastLineLen < lineSec;
+            if(accelerate){
+              dotThreshold = math.round(dotThreshold.toFloat * accelFactors.next)
+              dotSpaceThreshold = dotThreshold * 5;
+              dotNewlineThreshold = dotThreshold * 20;
+            }
+            val newNumX = (i % dotNewlineThreshold) / dotThreshold;
+            lastLineLen = (20-newNumX).toDouble / 20.toDouble;
+            lastLineNum = dotNewlineThreshold - (iterCt % dotNewlineThreshold);
+            lastLineTime = currTime;
+            progressReport("["+iterCt+" "+elementTitle+" processed] [Time: "+getDateAndTimeString+"] ("+elapsedSec+"."+elapsedMilliString+"s; "+speedString+")"+reportFunction(a,iterCt));
+            if(accelerate){
+              reportln("[AutoProgressReporter: "+dotThreshold+" "+elementTitle+" per dot] [TargetTime = "+lineSec+"s]","progress")
+            }
+            startProgressLine(blankSpaces = newNumX, spacer = "x", groupSpacer = " ", dotsPerGroup = 5, groupsPerLine = 4, verb = "progress")
         }
       }
     }

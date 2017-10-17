@@ -9,14 +9,18 @@ import internalUtils.commandLineUI._;
 
 object runner {
   
-  final val UTIL_VERSION = "1.5.31"; // REPLACE_THIS_QORTS_VERSION_VARIABLE_WITH_VERSION_NUMBER          (note this exact text is used in a search-and-replace. Do not change it.)
-  final val UTIL_COMPILE_DATE = "Wed Apr 26 15:10:51 EDT 2017"; // REPLACE_THIS_QORTS_DATE_VARIABLE_WITH_DATE          (note this exact text is used in a search-and-replace. Do not change it.)
-  final val UTIL_COMPILE_TIME : Long = 1493233851; // REPLACE_THIS_QORTS_DATE_VARIABLE_WITH_TIME          (note this exact text is used in a search-and-replace. Do not change it.)
+  final val UTIL_VERSION = "1.5.98"; // REPLACE_THIS_QORTS_VERSION_VARIABLE_WITH_VERSION_NUMBER          (note this exact text is used in a search-and-replace. Do not change it.)
+  final val UTIL_COMPILE_DATE = "Mon Jun 19 15:57:53 EDT 2017"; // REPLACE_THIS_QORTS_DATE_VARIABLE_WITH_DATE          (note this exact text is used in a search-and-replace. Do not change it.)
+  final val UTIL_COMPILE_TIME : Long = 1497902273; // REPLACE_THIS_QORTS_DATE_VARIABLE_WITH_TIME          (note this exact text is used in a search-and-replace. Do not change it.)
 
   final val UTIL_MAJOR_VERSION = UTIL_VERSION.split("\\.")(0);
   final val UTIL_MINOR_VERSION = UTIL_VERSION.split("\\.")(1);
   final val UTIL_PATCH_VERSION = UTIL_VERSION.split("-")(0).split("\\+")(0).split("\\.")(2);
   
+  final val UTIL_COMPLETE_VERSION = UTIL_VERSION + "+" + UTIL_COMPILE_TIME;
+  
+  val UTILITY_TITLE= "Untitled Variant Analysis Tool"
+
   //final val FOR_HELP_STRING = "For help, use command: "
   
   final val Runner_ThisProgramsExecutableJarFileName : String = "testingUtils.jar";
@@ -31,8 +35,13 @@ object runner {
     (new internalTests.VcfAnnotateTX.ConvertAminoRangeToGenoRange),
     (new internalUtils.CalcACMGVar.CmdAssessACMG),
     (new internalTests.VcfAnnotateTX.CmdRecodeClinVarCLN),
-    (new internalTests.trackToSpan.trackToSpan)
-    
+    (new internalTests.trackToSpan.trackToSpan),
+    (new internalTests.VcfAnnotateTX.AddVariantDomainUtil),
+    (new internalTests.SimSeqError.GenerateSimulatedError),
+    new internalTests.VcfAnnotateTX.CmdAddCanonicalInfo,
+    new internalTests.SimSeqError.GenerateSimulatedError,
+    new internalTests.VcfAnnotateTX.redoDBNSFP,
+    new internalTests.VcfAnnotateTX.RedoEnsemblMerge
   ); 
   
   final val utilCommandList : Map[String, () => CommandLineRunUtil] = utilList.map((util) => {
@@ -85,6 +94,11 @@ object runner {
 
   def main(args: Array[String]){
     //println("Initializing...");
+    internalUtils.optionHolder.TOPLEVEL_COMMAND_LINE_ARGS = args;
+    
+    if(args.contains("--debugMode")){
+      internalUtils.optionHolder.OPTION_DEBUGMODE = true;
+    }
     
     if(args.contains("--verbose")){
       internalUtils.Reporter.init_base();

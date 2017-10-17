@@ -219,7 +219,7 @@ object qcGtfAnnotationBuilder {
    * 
    */
   
-  private def qcGetGeneCounts_readGtf(stranded : Boolean, gtffile : String, codes : GtfCodes) : GenomicArrayOfSets[String] = {
+  def qcGetGeneCounts_readGtf(stranded : Boolean, gtffile : String, codes : GtfCodes) : GenomicArrayOfSets[String] = {
     return buildGenomicArrayOfSets_fromGtf(stranded, gtffile, (gtfLine : GtfLine) => gtfLine.featureType == codes.STD_EXON_TYPE_CODE, (gtfLine : GtfLine) => extractGeneId(gtfLine, codes) );
   }
   private def qcGetTxArray_readGtf(stranded : Boolean, gtffile : String, codes : GtfCodes) : GenomicArrayOfSets[String] = {

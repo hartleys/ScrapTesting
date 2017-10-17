@@ -18,13 +18,15 @@ object optionHolder {
     }
   }*/
   
-
+  var OPTION_DEBUGMODE = false;
   
   var OPTION_noGzipOutput = false;
   
+  var TOPLEVEL_COMMAND_LINE_ARGS = Array[String]();
+  
   //val DEFAULT_debugMode = true;
   
-  var OPTION_debugMode = true;
+  var OPTION_verboseInputInfo = true;
   
   var OPTION_fastProgressBar = false;
   var OPTION_slowProgressBar = false;

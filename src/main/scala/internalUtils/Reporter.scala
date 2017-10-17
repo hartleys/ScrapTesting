@@ -256,13 +256,45 @@ object Reporter {
     loggers.map((logger) => logger.startReport(str,verb))
   }
   
+  def attachProgressReporter[A](pr : stdUtils.AdvancedIteratorProgressReporter[A]){
+    
+  }
+  
+  var PROGRESS_NEEDS_NEWLINE = true;
+  
+  def progressReport(s : String, verb : String = "progress"){
+    report("] " + s + "\n",verb=verb);
+  }
+  def progressDot(i : Int, dotsPerGroup : Int = 5, groupsPerLine : Int = 4, blankSpacer : String = "-", verb : String = "progress"){
+    if(PROGRESS_NEEDS_NEWLINE){
+      startProgressLine(i-1,dotsPerGroup = dotsPerGroup, groupsPerLine = groupsPerLine, verb=verb,spacer = blankSpacer);
+      PROGRESS_NEEDS_NEWLINE = false;
+    }
+    if(i != (groupsPerLine * dotsPerGroup) && i % dotsPerGroup == 0){
+      report(". ",verb);
+    } else {
+      report(".",verb);
+    }
+    
+  }
+  def startProgressLine(blankSpaces : Int, spacer : String = "x", groupSpacer : String = " ", dotsPerGroup : Int = 5, groupsPerLine : Int = 4, verb : String = "progress"){
+    var out = "[";
+    var grpNum = blankSpaces / dotsPerGroup;
+    out = out + stdUtils.repString(stdUtils.repString(spacer,dotsPerGroup)+groupSpacer,grpNum);
+    out = out + stdUtils.repString(spacer,blankSpaces % dotsPerGroup);
+    report(out,verb);
+  }
+  
+  
+  
   val warningCount = scala.collection.mutable.Map[String,Int]().withDefault((x : String) => 0);
   def warning(str : String, warnType : String = "default", limit : Int = -1){
-    if(limit < 0 || warningCount(warnType) < limit){
-      reportln("#### WARNING ("+warnType+"):","warn");
-      reportln("  >> "+str.split("\n").mkString("\n  >> "),"warn");
-    } else if(limit > 0 && warningCount(warnType) == limit){
-      reportln("(("+limit+"+ warnings of type "+warnType+". Further warnings of this type will be silent.))","warn");
+    val warnCt = warningCount(warnType)
+    if(limit < 0 || warnCt <= limit){
+      PROGRESS_NEEDS_NEWLINE = true;
+      reportln("  #### WARNING ("+warnType+" "+(warnCt+1)+"):","warn");
+      reportln("    >> "+str.split("\n").mkString("\n    >> "),"warn");
+      if(limit > 0 && warnCt == limit) reportln("       (("+limit+"+ warnings of type "+warnType+". Further warnings of this type will be silent.))","warn");
     }
     warningCount(warnType) += 1;
   }

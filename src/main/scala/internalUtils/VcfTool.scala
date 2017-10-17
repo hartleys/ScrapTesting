@@ -33,6 +33,15 @@ object VcfTool {
   
   val TOP_LEVEL_VCF_TAG : String = "SWH_";
   
+  def getAttributeAsStringList(vc : VariantContext, tag : String) : Seq[String] = {
+    val lst = vc.getAttributeAsList(tag).asScala;
+    if(lst.length == 1){
+      return( lst.head.toString.split(",") );
+    } else {
+      return( lst.map(_.toString()) );
+    }
+  }
+  
   case class VCFAnnoCodes(
         txList_TAG : String = TOP_LEVEL_VCF_TAG+ "TXLIST",
         vType_TAG : String = TOP_LEVEL_VCF_TAG+"VARTYPE",
@@ -54,8 +63,20 @@ object VcfTool {
         grpHetFrq_TAG : String = TOP_LEVEL_VCF_TAG+"HetFrq_GRP_",
         grpMisCt_TAG : String = TOP_LEVEL_VCF_TAG+"MisCt_GRP_",
         grpMisFrq_TAG : String = TOP_LEVEL_VCF_TAG+"MisFrq_GRP_",
-        grpRefAC_TAG : String = TOP_LEVEL_VCF_TAG+"RefAC_GRP_",
-        grpRefAF_TAG : String = TOP_LEVEL_VCF_TAG+"RefAF_GRP_",
+        grpRefAC_TAG : String = TOP_LEVEL_VCF_TAG+"AC_REF_GRP_",
+        grpRefAF_TAG : String = TOP_LEVEL_VCF_TAG+"AF_REF_GRP_",
+        
+        grpAltAC_TAG : String = TOP_LEVEL_VCF_TAG+"AC_ALT_GRP_",
+        grpAltHomCt_TAG : String = TOP_LEVEL_VCF_TAG+"HomCt_ALT_GRP_",
+        grpAltHetCt_TAG : String = TOP_LEVEL_VCF_TAG+"HetCt_ALT_GRP_",
+        grpRefHomCt_TAG : String = TOP_LEVEL_VCF_TAG+"HomCt_REF_GRP_",
+        grpRefHetCt_TAG : String = TOP_LEVEL_VCF_TAG+"HetCt_REF_GRP_",
+        
+        CLNVAR_SUMSIG : String = TOP_LEVEL_VCF_TAG+"ClinVar_SumSig",
+        CLNVAR_SUMSIGWARN : String = TOP_LEVEL_VCF_TAG+"ClinVar_SumSig_Warning",
+        CLNVAR_SUMSIG_SAFE : String = TOP_LEVEL_VCF_TAG+"ClinVar_SumSig_NoWarn",
+        
+        domainIds : String = TOP_LEVEL_VCF_TAG+"domainIdList",
         
         isSplitMulti_TAG : String = TOP_LEVEL_VCF_TAG+"isSplitMult",
         splitIdx_TAG     : String = TOP_LEVEL_VCF_TAG+"splitIdx",
@@ -74,8 +95,21 @@ object VcfTool {
         assess_ctrlAFMIN : String = TOP_LEVEL_VCF_TAG+"ACMG_ctrlAFMIN",
         assess_ctrlAFMAX : String = TOP_LEVEL_VCF_TAG+"ACMG_ctrlAFMAX",
         
+        assess_geneList : String =  TOP_LEVEL_VCF_TAG+"ACMG_genes",
+        assess_geneTxList : String =  TOP_LEVEL_VCF_TAG+"ACMG_geneTX",
+        
         assess_LofGenes : String =  TOP_LEVEL_VCF_TAG+"ACMG_LofGenes",
         assess_MisGenes : String =  TOP_LEVEL_VCF_TAG+"ACMG_MisGenes",
+        
+        assess_LofTX : String =  TOP_LEVEL_VCF_TAG+"ACMG_LofTX",
+        assess_MisTX : String =  TOP_LEVEL_VCF_TAG+"ACMG_MisTX",
+        
+        assess_geneLofTxRatio : String =  TOP_LEVEL_VCF_TAG+"ACMG_geneLofTxRatio",
+        assess_geneMisTxRatio : String =  TOP_LEVEL_VCF_TAG+"ACMG_geneMisTxRatio",
+        
+        assess_refSeqLOF : String = TOP_LEVEL_VCF_TAG+"ACMG_geneCanonLOF",
+        assess_refSeqMis : String = TOP_LEVEL_VCF_TAG+"ACMG_geneCanonMis",
+        assess_refSeqKnown : String = TOP_LEVEL_VCF_TAG+"ACMG_geneCanonIsKnown",
         
         assess_PVS1 : String = TOP_LEVEL_VCF_TAG+"ACMG_PVS1",
         assess_PS1 : String = TOP_LEVEL_VCF_TAG+"ACMG_PS1",
@@ -93,18 +127,42 @@ object VcfTool {
         assess_BS1 : String = TOP_LEVEL_VCF_TAG+"ACMG_BS1",
         assess_BS2 : String = TOP_LEVEL_VCF_TAG+"ACMG_BS2",
         assess_BA1 : String = TOP_LEVEL_VCF_TAG+"ACMG_BA1",
+        
         assess_RATING : String = TOP_LEVEL_VCF_TAG+"ACMG_RATING",
         assess_WARNINGS : String = TOP_LEVEL_VCF_TAG+"ACMG_WARN",
         assess_WARNFLAG : String = TOP_LEVEL_VCF_TAG+"ACMG_WARNFLAG",
         
-        assess_exactMatchRS : String = TOP_LEVEL_VCF_TAG+"ACMG_ExactMatchRS",
-        assess_aminoMatchRS : String = TOP_LEVEL_VCF_TAG+"ACMG_AminoMatchRS",
-        assess_nearMatchRS : String = TOP_LEVEL_VCF_TAG+"ACMG_NearMatchRS",
+        assess_PVS1_CANON : String = TOP_LEVEL_VCF_TAG+"ACMG_PVS1_CANON",
+        assess_PP2_CANON : String = TOP_LEVEL_VCF_TAG+"ACMG_PP2_CANON",
+        assess_BP1_CANON : String = TOP_LEVEL_VCF_TAG+"ACMG_BP1_CANON",
+        assess_BP3_CANON : String = TOP_LEVEL_VCF_TAG+"ACMG_BP3_CANON",
+        assess_PM4_CANON : String = TOP_LEVEL_VCF_TAG+"ACMG_PM4_CANON",
+        assess_PS1_CANON : String = TOP_LEVEL_VCF_TAG+"ACMG_PS1_CANON",
+        assess_PM5_CANON : String = TOP_LEVEL_VCF_TAG+"ACMG_PM5_CANON",
+        assess_BP7_CANON : String = TOP_LEVEL_VCF_TAG+"ACMG_BP7_CANON",
+        assess_RATING_CANON : String = TOP_LEVEL_VCF_TAG+"ACMG_RATING_CANON",
+        
+        assess_exactMatchInfo : String = TOP_LEVEL_VCF_TAG+"ACMG_cvInfo_ExactMatch",
+        assess_aminoMatchInfo : String = TOP_LEVEL_VCF_TAG+"ACMG_cvInfo_AminoMatch",
+        assess_nearMatchInfo : String = TOP_LEVEL_VCF_TAG+"ACMG_cvInfo_NearMatch",
+        
+        assess_pathoExactMatchRS : String = TOP_LEVEL_VCF_TAG+"ACMG_cvPath_ExactMatch",
+        assess_pathoAminoMatchRS : String = TOP_LEVEL_VCF_TAG+"ACMG_cvPath_AminoMatch",
+        assess_pathoNearMatchRS : String = TOP_LEVEL_VCF_TAG+"ACMG_cvPath_NearMatch",
+        
+        assess_pathoAminoMatchRS_CANON : String = TOP_LEVEL_VCF_TAG+"ACMG_cvPath_AminoMatch_CANON",
+        assess_pathoNearMatchRS_CANON : String = TOP_LEVEL_VCF_TAG+"ACMG_cvPath_NearMatch_CANON",
+        assess_aminoMatchInfo_CANON : String = TOP_LEVEL_VCF_TAG+"ACMG_cvInfo_AminoMatch_CANON",
+        assess_nearMatchInfo_CANON : String = TOP_LEVEL_VCF_TAG+"ACMG_cvInfo_NearMatch_CANON",
+        
+        assess_inSilicoSummary : String = TOP_LEVEL_VCF_TAG+"ACMG_inSilicoSummary",
         
         geneIDs : String = TOP_LEVEL_VCF_TAG+"txGeneIDs",
         
         delims : Vector[String] = Vector(",","|")
       );
+  
+  val DefaultVCFAnnoCodes = VCFAnnoCodes();
   
   val UNAUTOMATED_ACMG_PARAMS = Seq[(String,Int,String)](
         ("PS",2 , TOP_LEVEL_VCF_TAG+"ACMG_PS2"),
@@ -145,6 +203,20 @@ object VcfTool {
       vcfWriter.close();
     }
     
+    def chain(walker2 : VCFWalker, flag : Boolean = true) : VCFWalker = {
+      if(flag){
+        val parent : VCFWalker = this;
+        return new VCFWalker {
+          def walkVCF(vcIter : Iterator[VariantContext], vcfHeader : VCFHeader, verbose : Boolean = true) : (Iterator[VariantContext],VCFHeader) = {
+            val (iter2,header2) = parent.walkVCF(vcIter = vcIter, vcfHeader = vcfHeader, verbose = verbose);
+            walker2.walkVCF(vcIter = iter2, vcfHeader = header2, verbose=verbose);
+          }
+        }
+      } else {
+        return this;
+      }
+    }
+    
   }
   
     def getAltAllelesInOrder(vc : VariantContext) : Seq[Allele] = {
@@ -158,11 +230,36 @@ object VcfTool {
   
   //htsjdk.variant.variantcontext.writer.VariantContextWriter
   
+  def splitHeaderLinesByType(headerLines : Seq[VCFHeaderLine]) : (Seq[VCFHeaderLine],Seq[VCFFormatHeaderLine],Seq[VCFInfoHeaderLine]) = {
+    val newFormatHeaderLines : (Seq[VCFHeaderLine],Seq[VCFFormatHeaderLine],Seq[VCFInfoHeaderLine]) = headerLines.foldLeft((Seq[VCFHeaderLine](),Seq[VCFFormatHeaderLine](),Seq[VCFInfoHeaderLine]())){ case ((otherLines,fmtLines,infoLines),curr) => {
+      curr match {
+        case hl : VCFFormatHeaderLine => {
+          (otherLines,fmtLines :+ hl, infoLines)
+        }
+        case hl : VCFInfoHeaderLine => {
+          (otherLines,fmtLines,infoLines :+ hl)
+        }
+        case hl : VCFHeaderLine => {
+          (otherLines :+ hl, fmtLines,infoLines)
+        }
+      }
+    }}
+    newFormatHeaderLines;
+  }
+    
   def addHeaderLines(vcfHeader : VCFHeader, headerLines : Seq[VCFHeaderLine]) : VCFHeader = {
-    val newHeaderLines : List[VCFHeaderLine] = vcfHeader.getMetaDataInInputOrder().toList ++
-                                               headerLines.toList;
+    val (newOtherLines,newFmtLines,newInfoLines) = splitHeaderLinesByType(headerLines);
+    val (oldOtherLines,oldFmtLines,oldInfoLines) = splitHeaderLinesByType(vcfHeader.getMetaDataInInputOrder().toList);
     
+    val oldHeaderLines : List[VCFHeaderLine] = vcfHeader.getMetaDataInInputOrder().toList;
     
+    val newFmtSet = newFmtLines.map(hl => hl.getID).toSet;
+    val newInfoSet = newInfoLines.map(hl => hl.getID).toSet;
+    
+    val filtFmtLines = oldFmtLines.filter(hl => ! newFmtSet.contains(hl.getID()));
+    val filtInfoLines = oldInfoLines.filter(hl => ! newInfoSet.contains(hl.getID()));
+    
+    val newHeaderLines : Seq[VCFHeaderLine] = (newOtherLines ++ oldOtherLines ++ filtFmtLines ++ newFmtLines ++ filtInfoLines ++ newInfoLines);
     
     return new VCFHeader(newHeaderLines.toSet.asJava,
                          vcfHeader.getSampleNamesInOrder().asInstanceOf[java.util.List[String]]);
@@ -213,8 +310,34 @@ object VcfTool {
       
       val finalIterator = chromSet match {
         case Some(cs) => {
-          internalUtils.stdUtils.wrapIteratorWithAdvancedProgressReporter[VariantContext](vcfIterator,
-              internalUtils.stdUtils.AdvancedIteratorProgressReporter_ThreeLevel[VariantContext](elementTitle = "lines", a,b,c,((a : VariantContext,i : Int) => a.getContig()))).filter(v =>  cs.contains(v.getContig()));
+          if(cs.size == 1){
+            val chr = cs.head;
+            
+            val preProgRep = internalUtils.stdUtils.AdvancedIteratorProgressReporter_ThreeLevelAuto[VariantContext](
+                elementTitle  = "skipped lines", lineSec = 60,
+                reportFunction  = ((vc : VariantContext, i : Int) => " " + vc.getContig())
+            );
+            val postProgRep = internalUtils.stdUtils.AdvancedIteratorProgressReporter_ThreeLevelAuto[VariantContext](
+                elementTitle  = "processed lines", lineSec = 60,
+                reportFunction  = ((vc : VariantContext, i : Int) => " " + vc.getContig())
+            );
+            
+            var i = 1;
+            var j = 1;
+            vcfIterator.dropWhile{ v => {
+              preProgRep.reportProgress(i,v);
+              i = i + 1;
+              v.getContig() != chr;
+            }}.takeWhile{ v => {
+              postProgRep.reportProgress(j,v);
+              j = j + 1;
+              v.getContig() == chr;
+            }}
+          } else {
+            internalUtils.stdUtils.wrapIteratorWithAdvancedProgressReporter[VariantContext](vcfIterator,
+                internalUtils.stdUtils.AdvancedIteratorProgressReporter_ThreeLevel[VariantContext](elementTitle = "lines", a,b,c,((a : VariantContext,i : Int) => a.getContig()))).filter(v =>  cs.contains(v.getContig()));            
+          }
+
         }
         case None => {
           internalUtils.stdUtils.wrapIteratorWithAdvancedProgressReporter[VariantContext](vcfIterator,
@@ -546,6 +669,284 @@ object VcfTool {
    }
    
   */
+  
+  object SVcfLine {
+    
+    def readVcf(lines : Iterator[String], withProgress : Boolean = true) : (SVcfHeader,Iterator[SVcfInputVariantLine]) = {
+      val (allRawHeaderLines,rawVariantLines) = lines.span(line => line.startsWith("#"));
+      val header = readVcfHeader(allRawHeaderLines.toVector);
+      
+      val variantLines = if(withProgress){
+                         internalUtils.stdUtils.wrapIteratorWithAdvancedProgressReporter[SVcfInputVariantLine](
+                           rawVariantLines.map(line => SVcfInputVariantLine(line,header)),
+                           internalUtils.stdUtils.AdvancedIteratorProgressReporter_ThreeLevelAuto[SVcfInputVariantLine](
+                                elementTitle = "lines", lineSec = 60,
+                                reportFunction  = ((vc : SVcfInputVariantLine, i : Int) => " " + vc.chrom +" "+ internalUtils.stdUtils.MemoryUtil.memInfo )
+                           )
+                         )
+      } else {
+        rawVariantLines.map(line => SVcfInputVariantLine(line,header))
+      }
+      
+      (header,variantLines);
+    }
+    
+    //Read Header Lines:
+    def readVcfHeader(lines : Seq[String]) : SVcfHeader = {
+      var infoLines = Seq[SVcfCompoundHeaderLine]();
+      var formatLines = Seq[SVcfCompoundHeaderLine]();
+      var otherHeaderLines = Seq[SVcfHeaderLine]();
+      
+      lines.init.foreach(line => {
+        if(line.startsWith("##INFO=")){
+          infoLines = infoLines :+ makeCompoundLineFromString(line);
+        } else if(line.startsWith("##FORMAT=")){
+          formatLines = formatLines :+ makeCompoundLineFromString(line);
+        } else {
+          otherHeaderLines = otherHeaderLines :+ makeSimpleHeaderLineFromString(line);
+        }
+      })
+      val titleLine = SVcfTitleLine(lines.last.split("\t").drop(9));
+      
+      SVcfHeader(infoLines, formatLines, otherHeaderLines, titleLine);
+    }
+    
+    def makeSimpleHeaderLineFromString(line : String) : SVcfHeaderLine = {
+      val tagPair = line.drop(2).split("=",2);
+      if(tagPair.length != 2){
+        warning("VCF header line malformed?\n\""+line+"\"","MALFORMED_VCF_HEADER_LINE",100);
+      }
+      val tag = tagPair(0);
+      val value = tagPair(1);
+      new SVcfHeaderLine(tag,value);
+    }
+    
+    def makeCompoundLineFromString(line : String) : SVcfCompoundHeaderLine = {
+      val tagPair = line.drop(2).split("=",2);
+      val tag = tagPair(0);
+      val tagmap = tagPair(1).tail.init.split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)").map(compoundString => {
+        val ctp = compoundString.split("=",2);
+        (ctp(0),ctp(1));
+      }).toMap;
+      
+      SVcfCompoundHeaderLine(in_tag = tag, ID = tagmap("ID"), Number = tagmap("Number") ,  Type = tagmap("Number") , desc = tagmap.getOrElse("Description","."));
+    }
+    
+    /////////// Read Variant Lines:
+    
+  }
+  
+  case class SVcfHeader(var infoLines : Seq[SVcfCompoundHeaderLine], 
+                        var formatLines : Seq[SVcfCompoundHeaderLine], 
+                        var otherHeaderLines : Seq[SVcfHeaderLine],
+                        var titleLine : SVcfTitleLine){
+    def getVcfLines : Seq[String] = (otherHeaderLines ++ infoLines ++ formatLines :+ titleLine).map(_.getVcfString);
+  }
+  
+  abstract class SVcfLine {
+    def getVcfString : String;
+  }
+  class SVcfHeaderLine(in_tag : String, var in_value : String) extends SVcfLine{
+    var tag : String = in_tag;
+    var value : String = in_value;
+    
+    def getVcfString : String = "##" + tag + "=" + value;
+  }
+  case class SVcfTitleLine(sampleList : Seq[String]) extends SVcfLine {
+    def getVcfString : String = "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t"+sampleList.mkString("\t");
+  }
+  
+  case class SVcfCompoundHeaderLine(in_tag : String, var ID : String, var Number : String, var Type : String, var desc : String) extends 
+              SVcfHeaderLine(in_tag,"<ID="+ID+",Number="+Number+",Type="+Type+",Description=\""+desc+"\">") {
+    //var tag : String = in_tag;
+    //var value : String = "<ID="+ID+",Number="+Number+",Type="+Type+",Description=\""+desc+"\">";
+  }
+  
+  /*class SVcfVariantLine extends SVcfLine {
+    def getChrom : String;
+    def setChrom : Unit;
+    def getPos : String;
+    def setPos : Unit;
+    def getRef : String;
+    def setRef : Unit;
+    def getAlt : String;
+    def setAlt : Unit;
+    def 
+  }*/
+  
+  abstract class SVcfVariantLine extends SVcfLine {
+    def chrom : String
+    def pos : Int
+    def id : String
+    def ref : String
+    def alt : Seq[String]
+    def qual : String
+    def filter : String
+    def info : Map[String,Option[String]];
+    def format : Seq[String]
+    def genotypes : SVcfGenotypeSet;
+    
+    def getVcfString : String = chrom + "\t"+pos+"\t"+id+"\t"+ref+"\t"+alt.mkString(",")+"\t"+
+                                qual+"\t"+filter+"\t"+info.keySet.toSeq.sorted.map{ case t => {
+                                  val v = info(t);
+                                  v match {
+                                    case Some(sv) => t + "="+sv
+                                    case None => t
+                                  }
+                                }}.mkString(";")+"\t"+
+                                format.mkString(":")+"\t"+
+                                genotypes.getGenotypeStrings.mkString("\t");
+    def header : SVcfHeader;
+    
+    def getSampleIdx(sampID : String) : Int = {
+      header.titleLine.sampleList.indexOf(sampID);
+    }
+    def sampleCt : Int = {
+      header.titleLine.sampleList.length;
+    } 
+    
+    def getOutputLine() : SVcfOutputVariantLine = {
+      SVcfOutputVariantLine(
+       in_chrom = chrom,
+       in_pos = pos,
+       in_id = id,
+       in_ref = ref,
+       in_alt = alt,
+       in_qual = qual,
+       in_filter = filter,
+       in_info = info,
+       in_format = format,
+       in_genotypes = genotypes,
+       in_header = header
+      )
+    }
+  }
+  
+  case class SVcfInputVariantLine(inputLine : String, in_header : SVcfHeader) extends SVcfVariantLine {
+    override def getVcfString :  String = inputLine;
+    
+    lazy val cells = inputLine.split("\t");
+    
+    lazy val lzy_chrom = cells(0);
+    lazy val lzy_pos = string2int(cells(1));
+    lazy val lzy_id = cells(2);
+    lazy val lzy_ref = cells(3);
+    lazy val lzy_alt = cells(4).split(",");
+    lazy val lzy_qual = cells(5);
+    lazy val lzy_filter = cells(6);
+    lazy val lzy_info = cells(7).split(";").map(s => {
+      val c = s.split("=",2);
+      if(c.length == 1){
+        (c(0),None)
+      } else {
+        (c(0),Some(c(1)));
+      }
+    }).toMap;
+    lazy val lzy_format = cells(8).split(":");
+    lazy val lzy_genotypeStrings = cells.drop(9);
+    
+    def chrom = lzy_chrom;
+    def pos = lzy_pos;
+    def id = lzy_id;
+    def ref = lzy_ref;
+    def alt = lzy_alt;
+    def qual = lzy_qual;
+    def filter = lzy_filter;
+    def info = lzy_info;
+    def format = lzy_format;
+    //def genotypeStrings = lzy_genotypeStrings;
+    lazy val lzy_genotypes = SVcfGenotypeSet.getGenotypeSet(lzy_genotypeStrings, header, format);
+    def genotypes = lzy_genotypes;
+
+    def header = in_header;
+  }
+  
+  case class SVcfOutputVariantLine(
+      var in_chrom : String,
+      var in_pos : Int,
+      var in_id : String,
+      var in_ref : String,
+      var in_alt : Seq[String],
+      var in_qual : String,
+      var in_filter : String,
+      var in_info : Map[String,Option[String]],
+      var in_format : Seq[String],
+      var in_genotypes : SVcfGenotypeSet,
+      var in_header : SVcfHeader
+      ) extends SVcfVariantLine {
+    def chrom = in_chrom
+    def pos = in_pos
+    def id = in_id
+    def ref = in_ref
+    def alt = in_alt
+    def qual = in_qual
+    def filter = in_filter
+    def info = in_info
+    def format = in_format
+    def genotypes = in_genotypes
+    def header = in_header;
+    
+    def setGenotypeAttribute(sampID : String, tag : String, value : String) = {
+      val sampIdx = getSampleIdx(sampID);
+      val fmtIdx = format.indexOf(tag);
+      if(fmtIdx == -1){
+        genotypes.fmt = genotypes.fmt :+ header.formatLines.find(_.ID == tag).get;
+        in_format = in_format :+ tag;
+        val attrArray = Array.ofDim[String](sampleCt);
+        attrArray(sampIdx) = value;
+        genotypes.genotypeValues = genotypes.genotypeValues :+ attrArray;
+      } else {
+        genotypes.genotypeValues(fmtIdx)(sampIdx) = value;
+      }
+    }
+    
+    
+  }
+  
+  object SVcfGenotypeSet {
+    def getGenotypeSet(genotypeStrings : Seq[String], header : SVcfHeader, fmt : Seq[String]) : SVcfGenotypeSet = {
+      val out = Array.ofDim[String](fmt.length,header.titleLine.sampleList.length)
+      val fmtLines = fmt.map(f => {
+        header.formatLines.find(_.ID == f).get;
+      });
+      
+      
+      val cells = genotypeStrings.map(_.split(":",-1).padTo(fmt.length,"."));
+      
+      try{
+      cells.indices.foreach(i => {
+        (0 until fmt.length).foreach(j => {
+          out(j)(i) = cells(i)(j);
+        })
+      })
+      } catch {
+        case e : Exception => {
+          warning("Error attempting to decode genotypes:\n" + 
+                "   FMT: "+fmt.mkString(",") + "\n"+
+                "   GENOS: "+genotypeStrings.mkString("\t")+"\n",
+                "GENOTYPE_DECODER_ERROR",100
+                );
+          throw e;
+        }
+      }
+      
+      SVcfGenotypeSet(fmt = fmtLines,sampIDs = header.titleLine.sampleList,
+                      genotypeValues = out);
+    }
+  }
+  
+  case class SVcfGenotypeSet(var fmt : Seq[SVcfCompoundHeaderLine], 
+                             sampIDs : Seq[String], 
+                             var genotypeValues : Array[Array[String]]){
+    def getGenotypeStrings : Seq[String] = genotypeValues(0).indices.map(j => {
+      genotypeValues.indices.map(i => {
+        genotypeValues(i)(j)
+      }).mkString(":")
+    }).toSeq;
+    
+
+  }
+  
 }
 
 

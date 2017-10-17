@@ -30,13 +30,13 @@ List(
      " copyright notice.  Restrictions cannot be placed on its present or future use.",
 
      " Although all reasonable efforts have been taken to ensure the accuracy and reliability of the "+
-     " software and data, the National Human Genome Research Institute (NHGRI) and the U.S. Government "+
+     " software and data, the National Cancer Institute (NCI) and the U.S. Government "+
      " does not and cannot warrant the performance or results that may be obtained by using this software "+
-     " or data.  NHGRI and the U.S. Government disclaims all warranties as to performance, merchantability "+
+     " or data.  NCI and the U.S. Government disclaims all warranties as to performance, merchantability "+
      " or fitness for any particular purpose.",
 
      " In any work or product derived from this material, proper attribution of the authors as the source "+
-     " of the software or data should be made, using \"NHGRI Genome Technology Branch\" as the citation.",
+     " of the software or data should be made, using \"NCI, Division of Cancer Epidemiology and Genetics, Human Genetics Program\" as the citation.",
 
      " NOTE: This package includes (internally) the sam-1.113.jar library from picard tools."+
      " That package uses the MIT license, which can be accessed using the command:",
@@ -87,6 +87,10 @@ List(
                     new UnaryArgument( name = "quiet",
                                          arg = List("--quiet","-s"), // name of value
                                          argDesc = "Flag to indicate that only errors and warnings should be sent to stderr." // description
+                                       ) :: 
+                    new UnaryArgument( name = "debugMode",
+                                         arg = List("--debugMode"), // name of value
+                                         argDesc = "Flag to indicate that much more debugging information should be sent to stderr." // description
                                        ) :: 
                                        List();
   
@@ -143,7 +147,7 @@ List(
     //}
     
     //case (t, s) => if (t <:< typeOf[T]) Some(s.asInstanceOf[T]) else {error("FATAL INTERNAL ERROR: PARAMETER " + key + " OF WRONG TYPE!"); None};
-    def parseArguments(args : List[String], debugMode : Boolean = internalUtils.optionHolder.OPTION_debugMode) : Boolean = {
+    def parseArguments(args : List[String], debugMode : Boolean = internalUtils.optionHolder.OPTION_verboseInputInfo) : Boolean = {
       try {
       if(args.length < 1){
         reportShortHelp();
@@ -210,7 +214,7 @@ List(
     def getMarkdownManual() : String = {
       val sb = new StringBuilder("");
       
-      sb.append("# QoRTs: Quality Of Rna-seq Tool Set\n");
+      sb.append("# "+runner.runner.UTILITY_TITLE+"\n");
       sb.append("> Version " + runner.runner.UTIL_VERSION + " (Updated " + runner.runner.UTIL_COMPILE_DATE +")\n\n");
       sb.append("> ([back to main](../index.html)) ([back to java-utility help](index.html))\n\n");
       sb.append("## Help for java command \""+escapeToMarkdown(command)+"\"\n\n");
@@ -277,7 +281,7 @@ List(
       return sb.toString();
     }
     
-    private def parseArgs_master(inputArguments : List[String], debugMode : Boolean = internalUtils.optionHolder.OPTION_debugMode){
+    private def parseArgs_master(inputArguments : List[String], debugMode : Boolean = internalUtils.optionHolder.OPTION_verboseInputInfo){
       if(inputArguments.length < finalArgList.length){
          throwSyntaxErrorMessage("Not enough arguments: Require at least " + finalArgList.length + " arguments!\nRequired syntax is:\n" + getShortHelp());
       }
@@ -626,6 +630,6 @@ List(
     def parse(s : String) : List[Float] = s.split(",").map(string2float(_)).toList;
     def argType : String = "CommaDelimitedListOfDoubles";
     def unsetValue : List[Float] = List();
-  }  
+  }
   
 }
