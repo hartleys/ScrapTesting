@@ -994,6 +994,10 @@ object VcfTool {
     def format = genotypes.fmt
     //def header = in_header;
     
+    def addInfo(infoTag : String, infoVal : String){
+      in_info = in_info + ((infoTag,Some(infoVal)));
+    }
+    
   }
   
   object SVcfGenotypeSet {

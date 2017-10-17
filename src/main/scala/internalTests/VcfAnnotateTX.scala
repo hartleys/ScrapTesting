@@ -2540,6 +2540,12 @@ object VcfAnnotateTX {
                                          valueName = "grpA,A1,A2,...;grpB,B1,...",  
                                          argDesc =  "..."
                                         ) ::
+                    new BinaryOptionArgument[Int](
+                                         name = "numLinesRead", 
+                                         arg = List("--numLinesRead"), 
+                                         valueName = "n",  
+                                         argDesc =  "..."
+                                        ) ::
                     new BinaryOptionArgument[String](
                                          name = "superGroupList", 
                                          arg = List("--superGroupList"), 
@@ -2576,6 +2582,11 @@ object VcfAnnotateTX {
                                          argDesc = ""+
                                                    "" // description
                                        ) :: 
+                    new UnaryArgument( name = "fallbackParser",
+                                         arg = List("--fallbackParser"), // name of value
+                                         argDesc = ""+
+                                                   "" // description
+                                       ) :: 
                     new FinalArgument[String](
                                          name = "invcf",
                                          valueName = "variants.vcf",
@@ -2591,6 +2602,8 @@ object VcfAnnotateTX {
   def run(args : Array[String]) {
      val out = parser.parseArguments(args.toList.tail);
      if(out){ 
+       if(parser.get[Boolean]("fallbackParser")){
+       
        AddGroupInfoAnno(groupFile = parser.get[Option[String]]("groupFile"),
                             groupList = parser.get[Option[String]]("groupList"),
                             superGroupList = parser.get[Option[String]]("superGroupList"),
@@ -2606,7 +2619,24 @@ object VcfAnnotateTX {
                               parser.get[String]("outvcf"),
                               chromList = parser.get[Option[List[String]]]("chromList")
                           );
-       
+       } else {
+       SAddGroupInfoAnno(groupFile = parser.get[Option[String]]("groupFile"),
+                            groupList = parser.get[Option[String]]("groupList"),
+                            superGroupList = parser.get[Option[String]]("superGroupList"),
+                            chromList = parser.get[Option[List[String]]]("chromList"),
+                            addCounts = ! parser.get[Boolean]("noCts"),
+                            addFreq   = ! parser.get[Boolean]("noFrq"),
+                            addMiss   = ! parser.get[Boolean]("noMiss"),
+                            addAlle   = ! parser.get[Boolean]("noAlle"),
+                            addHetHom = ! parser.get[Boolean]("noGeno"),
+                            noMultiAllelics = parser.get[Boolean]("noMultiAllelics")
+                          ).walkVCFFile(
+                              parser.get[String]("invcf"), 
+                              parser.get[String]("outvcf"),
+                              chromList = parser.get[Option[List[String]]]("chromList"),
+                              numLinesRead = parser.get[Option[Int]]("numLinesRead")
+                          );
+       }
        /*runAddGroupInfoAnno( parser.get[String]("invcf"),
                             parser.get[String]("outvcf"),
                             groupFile = parser.get[Option[String]]("groupFile"),
@@ -2646,6 +2676,243 @@ object VcfAnnotateTX {
     })
     vcfWriter.close();
   }*/
+  
+  
+
+  case class SAddGroupInfoAnno(groupFile : Option[String], groupList : Option[String], superGroupList  : Option[String], chromList : Option[List[String]], 
+             addCounts : Boolean = true, addFreq : Boolean = true, addMiss : Boolean = true, 
+             addAlle : Boolean= true, addHetHom : Boolean = true, 
+             sepRef : Boolean = true, countMissing : Boolean = true,
+             noMultiAllelics : Boolean = false,
+             GTTag : String = "GT",
+             tagPrefix : String = "",
+             vcfCodes : VCFAnnoCodes = VCFAnnoCodes()) extends internalUtils.VcfTool.SVcfWalker {
+    
+    def walkVCF(vcIter : Iterator[SVcfVariantLine], vcfHeader : SVcfHeader, verbose : Boolean = true) : (Iterator[SVcfVariantLine], SVcfHeader) = {
+  
+      val sampleToGroupMap = new scala.collection.mutable.AnyRefMap[String,Set[String]](x => Set[String]());
+      val groupToSampleMap = new scala.collection.mutable.AnyRefMap[String,Set[String]](x => Set[String]());
+      var groupSet : Set[String] = Set[String]();
+      
+      groupFile match {
+        case Some(gf) => {
+          val r = getLinesSmartUnzip(gf).drop(1);
+          r.foreach(line => {
+            val cells = line.split("\t");
+            if(cells.length != 2) error("ERROR: group file must have exactly 2 columns. sample.ID and group.ID!");
+            groupToSampleMap(cells(1)) = groupToSampleMap(cells(1)) + cells(0);
+            sampleToGroupMap(cells(0)) = sampleToGroupMap(cells(0)) + cells(1);
+            groupSet = groupSet + cells(1);
+          })
+        }
+        case None => {
+          //do nothing
+        }
+      }
+      
+      groupList match {
+        case Some(g) => {
+          val r = g.split(";");
+          r.foreach(grp => {
+            val cells = grp.split(",");
+            val grpID = cells.head;
+            cells.tail.foreach(samp => {
+              sampleToGroupMap(samp) = sampleToGroupMap(samp) + grpID;
+              groupToSampleMap(grpID) = groupToSampleMap(grpID) + samp;
+            })
+            groupSet = groupSet + grpID;
+          })
+        }
+        case None => {
+          //do nothing
+        }
+      }
+      superGroupList match {
+        case Some(g) => {
+          val r = g.split(";");
+          r.foreach(grp => {
+            val cells = grp.split(",");
+            val grpID = cells.head;
+            cells.tail.foreach(subGrp => {
+              groupToSampleMap(grpID) = groupToSampleMap(grpID) ++ groupToSampleMap(subGrp);
+            })
+            groupSet = groupSet + grpID;
+          })
+        }
+        case None => {
+          //do nothing
+        }
+      }
+  
+      val sampNames = vcfHeader.getSampleList;
+      val groups = groupSet.toVector.sorted;
+  
+      reportln("Final Groups:","debug");
+      for((g,i) <- groups.zipWithIndex){
+        reportln("Group "+g+" ("+groupToSampleMap(g).size+")","debug");
+      }
+      
+      //addCounts : Boolean = true, addFreq : Boolean = true, addAlle, addHetHom : Boolean = true, sepRef : Boolean = true,
+      val forEachString = "for each possible allele (including the ref)"; //if(sepRef) "for each possible ALT allele (NOT including the ref)" else "for each possible allele (including the ref)";
+      val countingString = if(countMissing) " counting uncalled alleles." else " not counting uncalled alleles."
+      val newHeaderLines = groups.map(g => {
+        (if(addCounts && addAlle)   List(new SVcfCompoundHeaderLine("INFO" ,vcfCodes.grpAC_TAG + g, "R", "Integer", "For the "+groupToSampleMap(g).size+" samples in group "+g+", the number of alleles called "+forEachString+","+countingString)) else List[SVcfCompoundHeaderLine]()) ++
+        (if(addFreq   && addAlle)   List(new SVcfCompoundHeaderLine("INFO" ,vcfCodes.grpAF_TAG + g, "A", "Float", "For the "+groupToSampleMap(g).size+" samples in group "+g+", the proportion of alleles called "+"for each alt allele (not including ref)"+","+countingString)) else List[SVcfCompoundHeaderLine]()) ++
+        (if(addCounts && addHetHom) List(new SVcfCompoundHeaderLine("INFO" ,vcfCodes.grpHomCt_TAG + g, "R", "Integer", "For the "+groupToSampleMap(g).size+" samples in group "+g+", the number of homozygous genotypes called "+forEachString+","+countingString   )) else List[SVcfCompoundHeaderLine]()) ++
+        (if(addCounts && addHetHom) List(new SVcfCompoundHeaderLine("INFO" ,vcfCodes.grpHetCt_TAG + g, "R", "Integer", "For the "+groupToSampleMap(g).size+" samples in group "+g+", the number of heterozygous genotypes called "+forEachString+","+countingString )) else List[SVcfCompoundHeaderLine]()) ++
+        (if(addFreq   && addHetHom) List(new SVcfCompoundHeaderLine("INFO" ,vcfCodes.grpHomFrq_TAG + g, "A", "Float", "For the "+groupToSampleMap(g).size+" samples in group "+g+", the fraction of homozygous genotypes called "+"for each alt allele (not including ref)"+","+countingString  )) else List[SVcfCompoundHeaderLine]()) ++
+        (if(addFreq   && addHetHom) List(new SVcfCompoundHeaderLine("INFO" ,vcfCodes.grpHetFrq_TAG + g, "A", "Float", "For the "+groupToSampleMap(g).size+" samples in group "+g+", the fraction of heterozygous genotypes called "+"for each alt allele (not including ref)"+","+countingString)) else List[SVcfCompoundHeaderLine]()) ++
+        (if(addCounts && addMiss)   List(new SVcfCompoundHeaderLine("INFO" ,vcfCodes.grpMisCt_TAG + g,  "1", "Integer", "For the "+groupToSampleMap(g).size+" samples in group "+g+", the number of alleles missing (non-called).")) else List[SVcfCompoundHeaderLine]()) ++
+        (if(addFreq   && addMiss)   List(new SVcfCompoundHeaderLine("INFO" ,vcfCodes.grpMisFrq_TAG + g, "1", "Float", "For the "+groupToSampleMap(g).size+" samples in group "+g+", the fraction of alleles missing (non-called).")) else List[SVcfCompoundHeaderLine]()) ++
+        (if(addCounts && addAlle)   List(new SVcfCompoundHeaderLine("INFO" ,vcfCodes.grpAltAC_TAG + g, "A", "Integer", "For the "+groupToSampleMap(g).size+" samples in group "+g+", the number of alleles called for the alt allele(s)")) else List[SVcfCompoundHeaderLine]()) ++
+        (if(addCounts && addHetHom)   List(new SVcfCompoundHeaderLine("INFO" ,vcfCodes.grpAltHetCt_TAG + g, "A", "Integer", "For the "+groupToSampleMap(g).size+" samples in group "+g+", the number of genotypes called as heterozygous for the alt allele(s)")) else List[SVcfCompoundHeaderLine]()) ++
+        (if(addCounts && addHetHom)   List(new SVcfCompoundHeaderLine("INFO" ,vcfCodes.grpAltHomCt_TAG + g,"A", "Integer", "For the "+groupToSampleMap(g).size+" samples in group "+g+", the number of genotypes called as homozygous for the alt allele(s)")) else List[SVcfCompoundHeaderLine]()) ++
+        (if(addCounts && addHetHom)   List(new SVcfCompoundHeaderLine("INFO" ,vcfCodes.grpRefHomCt_TAG + g, "1", "Integer", "For the "+groupToSampleMap(g).size+" samples in group "+g+", the number of genotypes called as homozygous for the reference allele")) else List[SVcfCompoundHeaderLine]()) ++
+        (if(addCounts && addHetHom)   List(new SVcfCompoundHeaderLine("INFO" ,vcfCodes.grpRefHetCt_TAG + g, "1", "Integer", "For the "+groupToSampleMap(g).size+" samples in group "+g+", the number of genotypes called as heterozygous for the reference allele")) else List[SVcfCompoundHeaderLine]()) ++
+        (if(addCounts && addAlle)   List(new SVcfCompoundHeaderLine("INFO" ,vcfCodes.grpRefAC_TAG + g, "1", "Integer", "For the "+groupToSampleMap(g).size+" samples in group "+g+", the number of alleles called for the reference allele")) else List[SVcfCompoundHeaderLine]()) ++
+        List[SVcfCompoundHeaderLine]()
+      }).flatten.toList
+      
+      //        (if(addFreq && addAlle)     List(new VCFInfoHeaderLine(vcfCodes.grpRefAF_TAG + g, 1, VCFHeaderLineType.Float, "For the "+groupToSampleMap(g).size+" samples in group "+g+", the proportion of alleles called for the reference allele")) else List[VCFHeaderLine]()) ++
+
+  
+        //      grpMisCt_TAG : String = TOP_LEVEL_VCF_TAG+"MisCt_GRP_",
+        //  grpMisFrq_TAG : String = TOP_LEVEL_VCF_TAG+"MisFrq_GRP_",
+        //  grpRefAC_TAG : String = TOP_LEVEL_VCF_TAG+"RefAC_GRP_",
+        //  grpRefAF_TAG : String = TOP_LEVEL_VCF_TAG+"RefAF_GRP_",
+      
+      newHeaderLines.foreach{hl => {
+        vcfHeader.addInfoLine(hl);
+      }}
+      
+      return (vcIter.map(vc => {
+        var vb = vc.getOutputLine()
+        val gtidx = vc.genotypes.fmt.indexOf(GTTag);
+        val gt = vc.genotypes.genotypeValues(gtidx).map{_.split("/")}.zip(sampNames);
+        val alleles = Range(0,vc.alt.length + 1).map(_.toString());
+        
+        val groupAlleCts = alleles.map(alle => { groups.map(grp => {
+            val sampSet = groupToSampleMap(grp);
+            gt.foldLeft(0){case (soFar,(g,samp)) => {
+              if(sampSet.contains(samp)){
+                soFar + g.count(_ == alle);
+              } else {
+                soFar;
+              }
+            }}
+          })
+        });
+        
+        val groupMisCts = groups.map(grp => {
+            val sampSet = groupToSampleMap(grp);
+            gt.foldLeft(0){case (soFar,(g,samp)) => {
+              if(sampSet.contains(samp)){
+                soFar + (if(g.exists(_ == ".")) 1 else 0)
+              } else {
+                soFar;
+              }
+            }}
+          })
+        
+        val groupHomCts = alleles.map(alle => { groups.map(grp => {
+            val sampSet = groupToSampleMap(grp);
+            gt.foldLeft(0){case (soFar,(g,samp)) => {
+              if(sampSet.contains(samp) && g.count(_ == alle) == 2){
+                soFar + 1;
+              } else {
+                soFar;
+              }
+            }}
+          })
+        });
+        val groupHetCts = alleles.map(alle => { groups.map(grp => {
+            val sampSet = groupToSampleMap(grp);
+            gt.foldLeft(0){case (soFar,(g,samp)) => {
+              if(sampSet.contains(samp) && g.count(_ == alle) == 1){
+                soFar + 1;
+              } else {
+                soFar;
+              }
+            }}
+          })
+        });
+        val ploidy = gt.map(_._1.length).max
+        val groupGenoSums = groups.map(grp => groupToSampleMap(grp).size.toDouble )
+        val groupAlleAllSums = groups.zipWithIndex.map{case (grp,gi) => {
+            val sampSet = groupToSampleMap(grp);
+            gt.foldLeft(0){case (soFar,(g,samp)) => {
+              if(sampSet.contains(samp)){
+                soFar + ploidy
+              } else {
+                soFar;
+              }
+            }}.toDouble
+        }}
+        val groupAlleSums = if(countMissing){
+          groupAlleAllSums;
+        } else {
+          groups.zipWithIndex.map{case (grp,gi) => {
+            groupAlleCts.map(_(gi)).sum.toDouble
+          }}
+        }
+        
+        val groupAlleAF = groupAlleCts.map{groupAC => {
+          groupAC.zip(groupAlleSums).map{case (ct,sumCt) => ct.toDouble / sumCt};
+        }}
+        
+        val groupHomFrq = groupHomCts.map{groupCt => {
+          groupCt.zip(groupGenoSums).map{case (ct,sumCt) => { ct.toDouble / sumCt }}
+          //groupCt.map(_.toDouble / sumCt);
+        }}
+        val groupHetFrq = groupHetCts.map{groupCt => {
+          groupCt.zip(groupGenoSums).map{case (ct,sumCt) => { ct.toDouble / sumCt }}
+        }}
+        val groupMisFrq = groupMisCts.zip(groupAlleAllSums).map{case (ct,sumCt) => { ct.toDouble / sumCt }}
+        
+        //vb.genotypes.addGenotypeArray(
+        //vb.addGenotypeArray
+        for((g,i) <- groups.zipWithIndex){
+          if(addCounts && addAlle) vb.addInfo(vcfCodes.grpAC_TAG + g, groupAlleCts.map(_(i)).mkString(","));
+          if(addCounts && addHetHom) vb.addInfo(vcfCodes.grpHomCt_TAG  + g, groupHomCts.map(_(i)).mkString(","));
+          if(addCounts && addHetHom) vb.addInfo(vcfCodes.grpHetCt_TAG  + g, groupHetCts.map(_(i)).mkString(","));
+          if(addCounts   && addMiss) vb.addInfo(vcfCodes.grpMisCt_TAG + g,  groupMisCts(i).toString);
+          if(addFreq     && addMiss) vb.addInfo(vcfCodes.grpMisFrq_TAG + g, groupMisFrq(i).toString);
+          
+          if(noMultiAllelics){
+            if(addFreq && addAlle) vb.addInfo(vcfCodes.grpAF_TAG + g, groupAlleAF.tail.head(i).toString());
+            if(addFreq && addHetHom) vb.addInfo(vcfCodes.grpHomFrq_TAG + g, groupHomFrq.tail.head(i).toString());
+            if(addFreq && addHetHom) vb.addInfo(vcfCodes.grpHetFrq_TAG + g, groupHetFrq.tail.head(i).toString());
+            if(addCounts && addAlle)   vb.addInfo(vcfCodes.grpAltAC_TAG + g,    groupAlleCts.tail.head(i).toString());
+            if(addCounts && addHetHom) vb.addInfo(vcfCodes.grpAltHetCt_TAG + g, groupHetCts.tail.head(i).toString());
+            if(addCounts && addHetHom) vb.addInfo(vcfCodes.grpAltHomCt_TAG + g, groupHomCts.tail.head(i).toString());
+          } else {
+            if(addFreq && addAlle) vb.addInfo(vcfCodes.grpAF_TAG + g, groupAlleAF.tail.map(_(i)).mkString(","));
+            if(addFreq && addHetHom) vb.addInfo(vcfCodes.grpHomFrq_TAG + g, groupHomFrq.tail.map(_(i)).mkString(","));
+            if(addFreq && addHetHom) vb.addInfo(vcfCodes.grpHetFrq_TAG + g, groupHetFrq.tail.map(_(i)).mkString(","));
+            if(addCounts && addAlle)   vb.addInfo(vcfCodes.grpAltAC_TAG + g,    groupAlleCts.tail.map(_(i)).mkString(","));
+            if(addCounts && addHetHom) vb.addInfo(vcfCodes.grpAltHetCt_TAG + g, groupHetCts.tail.map(_(i)).mkString(","));
+            if(addCounts && addHetHom) vb.addInfo(vcfCodes.grpAltHomCt_TAG + g, groupHomCts.tail.map(_(i)).mkString(","));
+          }
+          if(addCounts && addHetHom) vb.addInfo(vcfCodes.grpRefHomCt_TAG + g, groupHomCts.head(i).toString());
+          if(addCounts && addHetHom) vb.addInfo(vcfCodes.grpRefHetCt_TAG + g, groupHetCts.head(i).toString());
+          if(addCounts && addAlle) vb.addInfo(vcfCodes.grpRefAC_TAG + g, groupAlleCts.head(i).toString());
+          /*
+           (if(addCounts && addAlle)   List(new VCFInfoHeaderLine(vcfCodes.grpAltAC_TAG + g, VCFHeaderLineCount.A, VCFHeaderLineType.Integer, "For the "+groupToSampleMap(g).size+" samples in group "+g+", the number of alleles called for the alt allele(s)")) else List[VCFHeaderLine]()) ++
+        (if(addCounts && addHetHom)   List(new VCFInfoHeaderLine(vcfCodes.grpAltHetCt_TAG + g, VCFHeaderLineCount.A, VCFHeaderLineType.Integer, "For the "+groupToSampleMap(g).size+" samples in group "+g+", the number of genotypes called as heterozygous for the alt allele(s)")) else List[VCFHeaderLine]()) ++
+        (if(addCounts && addHetHom)   List(new VCFInfoHeaderLine(vcfCodes.grpAltHomCt_TAG + g, VCFHeaderLineCount.A, VCFHeaderLineType.Integer, "For the "+groupToSampleMap(g).size+" samples in group "+g+", the number of genotypes called as homozygous for the alt allele(s)")) else List[VCFHeaderLine]()) ++
+        (if(addCounts && addHetHom)   List(new VCFInfoHeaderLine(vcfCodes.grpRefHomCt_TAG + g, 1, VCFHeaderLineType.Integer, "For the "+groupToSampleMap(g).size+" samples in group "+g+", the number of genotypes called as homozygous for the reference allele")) else List[VCFHeaderLine]()) ++
+        (if(addCounts && addHetHom)   List(new VCFInfoHeaderLine(vcfCodes.grpRefHetCt_TAG + g, 1, VCFHeaderLineType.Integer, "For the "+groupToSampleMap(g).size+" samples in group "+g+", the number of genotypes called as heterozygous for the reference allele")) else List[VCFHeaderLine]()) ++
+        (if(addCounts && addAlle)   List(new VCFInfoHeaderLine(vcfCodes.grpRefAC_TAG + g, 1, VCFHeaderLineType.Integer, "For the "+groupToSampleMap(g).size+" samples in group "+g+", the number of alleles called for the reference allele")) else List[VCFHeaderLine]()) ++
+        (if(addCounts && addAlle)   List(new VCFInfoHeaderLine(vcfCodes.grpRefAF_TAG + g, 1, VCFHeaderLineType.Float, "For the "+groupToSampleMap(g).size+" samples in group "+g+", the proportion of alleles called for the reference allele")) else List[VCFHeaderLine]()) ++
+        
+           */
+          
+        }
+        
+        vb
+      }),vcfHeader);
+    }
+  }
   
   case class AddGroupInfoAnno(groupFile : Option[String], groupList : Option[String], superGroupList  : Option[String], chromList : Option[List[String]], 
              addCounts : Boolean = true, addFreq : Boolean = true, addMiss : Boolean = true, 
