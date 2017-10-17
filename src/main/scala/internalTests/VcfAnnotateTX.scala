@@ -69,6 +69,11 @@ object VcfAnnotateTX {
                                          argDesc = ""+
                                                    "" // description
                                        ) ::
+                    new UnaryArgument( name = "noGzipOutput",
+                                         arg = List("--noGzipOutput"), // name of value
+                                         argDesc = ""+
+                                                   "" // description
+                                       ) ::
                     new FinalArgument[String](
                                          name = "infile1",
                                          valueName = "variants1.vcf",
@@ -80,25 +85,25 @@ object VcfAnnotateTX {
                                          argDesc = "input VCF file. Can be gzipped or in plaintext." // description
                                         ) :: 
                     new FinalArgument[String](
-                                         name = "outfile",
-                                         valueName = "outfile.vcf.gz",
-                                         argDesc = "The output file. Can be gzipped or in plaintext."// description
+                                         name = "outfileprefix",
+                                         valueName = "outfileprefix",
+                                         argDesc = "The output file."// description
                                         ) ::
                     internalUtils.commandLineUI.CLUI_UNIVERSAL_ARGS );
 
      def run(args : Array[String]) {
        val out = parser.parseArguments(args.toList.tail);
        if(out){
-         val vsc = VcfStreamCompare(
+         VcfStreamCompare(
                           infile1 = parser.get[String]("infile1"),
                           infile2 = parser.get[String]("infile2"),
-                          outfile = parser.get[String]("outfile"),
+                          outfile = parser.get[String]("outfileprefix"),
                           chromList = parser.get[Option[List[String]]]("chromList"),
                           genoTag1 = parser.get[String]("GenoTag1"),
                           genoTag2 = parser.get[String]("GenoTag2"),
-                          infileList = parser.get[Boolean]("infileList")
-                          
-         );
+                          infileList = parser.get[Boolean]("infileList"),
+                          gzipOutput = ! parser.get[Boolean]("noGzipOutput")
+         ).run()
        }
      }
     
@@ -113,11 +118,14 @@ object VcfAnnotateTX {
                               genoTag2 : String,
                               file2tag : String = "B_",
                               file2Desc : String = "(For Alt Build) ",
-                              infileList : Boolean){
+                              infileList : Boolean,
+                              gzipOutput : Boolean){
     val (vcIterRaw1, vcfHeader1) = getSVcfIterators(infile1,chromList,None,inputFileList = infileList);
     val (vcIterRaw2, vcfHeader2) = getSVcfIterators(infile2,chromList,None,inputFileList = infileList, withProgress = false);
     val (vcIter1,vcIter2) = (vcIterRaw1.buffered, vcIterRaw2.buffered)
     var currChrom = vcIter1.head.chrom;
+    
+    val outfileSuffix = if(gzipOutput) ".gz" else "";
     
     val matchIdx = vcfHeader1.titleLine.sampleList.zipWithIndex.flatMap{ case (s,idx1) => {
       val idx2 = vcfHeader2.titleLine.sampleList.indexOf(s)
@@ -160,15 +168,15 @@ object VcfAnnotateTX {
                         ( vcIter1.head.chrom == currChrom && vcIter2.head.chrom != currChrom ) 
                    );
     
-    val outM = openWriterSmart(outfile+"shared.vcf.gz");
+    val outM = openWriterSmart(outfile+"shared.vcf"+outfileSuffix);
     //val outMM = openWriterSmart(outfile+"sharedMis.vcf.gz");
-    val out1 = openWriterSmart(outfile+"F1.vcf.gz");
-    val out2 = openWriterSmart(outfile+"F2.vcf.gz");
+    val out1 = openWriterSmart(outfile+"F1.vcf"+outfileSuffix);
+    val out2 = openWriterSmart(outfile+"F2.vcf"+outfileSuffix);
     val writers = Seq(outM,out1,out2);
     
-    val matchWriter = openWriterSmart(outfile+"summary.match.txt.gz");
-    val AWriter = openWriterSmart(outfile+"summary.A.txt.gz");
-    val BWriter = openWriterSmart(outfile+"summary.B.txt.gz");
+    val matchWriter = openWriterSmart(outfile+"summary.match.txt"+outfileSuffix);
+    val AWriter = openWriterSmart(outfile+"summary.A.txt"+outfileSuffix);
+    val BWriter = openWriterSmart(outfile+"summary.B.txt"+outfileSuffix);
 
     writers.foreach(out => {
       vcfHeaderOut.getVcfLines.foreach{ l =>
@@ -183,7 +191,9 @@ object VcfAnnotateTX {
     var alleAt2not1ct = 0;
     
     def run(){
+      reportln("> ITERATE()","debug");
       while(vcIter1.hasNext || vcIter2.hasNext){
+        reportln("> ITERATE()","debug");
         iterate();
       }
       writers.foreach(out => {
@@ -226,28 +236,33 @@ object VcfAnnotateTX {
       matchWriter.close();
       AWriter.close();
       BWriter.close();
+      
     }
     
     def iterate(){
       val vcos = if(
                     (vcIter1.hasNext & ! vcIter2.hasNext)  || (vcIter2.hasNext & ! vcIter1.hasNext) || 
                     (vcIter1.head.pos != vcIter2.head.pos) || (vcIter1.head.chrom != vcIter2.head.chrom)){
+        reportln("   Iterating Isolated position.","deepDebug");
         if(isFirst){
           val vc = vcIter1.next();
+          reportln("   Iterating VC1 Isolated Position: "+vc.chrom+":"+vc.pos,"debug");
           at1not2ct += 1;
           writeVC1(vc);
         } else {
           val vc = vcIter2.next().getOutputLine();
+          reportln("   Iterating VC2 Isolated Position: "+vc.chrom+":"+vc.pos,"debug");
           at2not1ct += 1;
           writeVC2(vc);
         };
       } else {
+        reportln("   Iterating Shared Position: "+vcIter1.head.chrom+":"+vcIter1.head.pos,"debug");
         iteratePos();
       }
     }
     
     def isCalled(vc : SVcfVariantLine, idx : Int, i : Int) : Boolean = {
-      vc.genotypes.genotypeValues(idx)(i) != "./." && vc.genotypes.genotypeValues(idx)(i) != "."
+      ! vc.genotypes.genotypeValues(idx)(i).contains('.')
     }
     def isCalled(vc : SVcfVariantLine, idx1 : Int, idx2 : Int, i : Int) : Boolean = {
       isCalled(vc,idx1,i) && isCalled(vc,idx2,i);
@@ -274,7 +289,7 @@ object VcfAnnotateTX {
       isHet(vc,idx,i) || isHomAlt(vc,idx,i);
     }
     def isOther(vc : SVcfVariantLine, idx : Int, i : Int) : Boolean = {
-      vc.genotypes.genotypeValues(idx)(i).charAt(0) == '2' || vc.genotypes.genotypeValues(idx)(i).charAt(3) == '2'
+      vc.genotypes.genotypeValues(idx)(i).length != 3 || vc.genotypes.genotypeValues(idx)(i).charAt(0) != '2' || vc.genotypes.genotypeValues(idx)(i).charAt(2) == '2'
     }
     
     val matchCountFunctionList_BASE : Vector[(String, Array[Int], SVcfVariantLine => Boolean, (SVcfVariantLine,Int,Int,Int) => Boolean)] = Vector[(String, Array[Int], SVcfVariantLine => Boolean, (SVcfVariantLine,Int,Int,Int) => Boolean)](
@@ -424,21 +439,26 @@ object VcfAnnotateTX {
       val v1s = extractWhile(vcIter1)( vc => { vc.pos ==  pos && vc.chrom == chrom});
       val v2s = extractWhile(vcIter2)( vc => { vc.pos ==  pos && vc.chrom == chrom});
       val alts : Vector[String] = (v1s.map{vc => vc.alt.head}.toSet ++ v2s.map{vc => vc.alt.head}).toSet.toVector.sorted;
+      reportln("      Found "+alts.length+" alt alleles at this position: ["+alts.mkString(",")+"]","debug")
+      
       alts.map{ alt => {
-        val v1idx = v1s.indexWhere{ vc => { vc.alt == alt }};
-        val v2idx = v2s.indexWhere{ vc => { vc.alt == alt }};
+        val v1idx = v1s.indexWhere{ vc => { vc.alt.head == alt }};
+        val v2idx = v2s.indexWhere{ vc => { vc.alt.head == alt }};
         if(v1idx == -1 ){
           val vc = v2s(v2idx).getOutputLine();
           alleAt2not1ct += 1;
+          reportln("      Allele found only on iter2: "+alt,"debug")
           writeVC2(vc);
         } else if(v2idx == -1) {
           val vc = v1s(v1idx).getOutputLine();
           alleAt1not2ct += 1;
+          reportln("      Allele found only on iter1: "+alt,"debug")
           writeVC1(vc);
         } else {
           val vc1 = v1s(v1idx).getOutputLine();
           val vc2 = v2s(v2idx).getOutputLine();
           matchCt += 1;
+          reportln("      Allele found on both: "+alt,"debug")
           writeJointVC(vc1,vc2);
         }
       }}
@@ -503,7 +523,7 @@ object VcfAnnotateTX {
         }}}.toArray}
       );
       val filt = if(vc1.filter == "." && vc2.filter == ".") { "." } else if(vc1.filter == vc2.filter) {
-        vc1.filter;
+        vc1.filter + "," + vc2.filter;
       } else {
         vc1.filter + "," + vc2.filter;
       }
