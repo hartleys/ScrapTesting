@@ -43,6 +43,13 @@ object makeBedWiggle {
                                          valueName = "targetregion.bed",  
                                          argDesc =  ""
                                         ) ::
+                    new BinaryArgument[String](
+                                         name = "trackTitle", 
+                                         arg = List("--trackTitle"), 
+                                         valueName = "bpCoverage",  
+                                         argDesc =  "",
+                                         defaultValue = Some("bpCoverage")
+                                        ) ::
                     new FinalArgument[String](
                                          name = "infile",
                                          valueName = "infile.bam",
@@ -68,14 +75,19 @@ object makeBedWiggle {
              outfileprefix = parser.get[String]("outfileprefix"),
              isSingleEnd = parser.get[Boolean]("singleEnded"),
              onTargetBed = parser.get[Option[String]]("onTargetBed"),
-             inputSavedTxFile = parser.get[String]("inputSavedTxFile")
+             inputSavedTxFile = parser.get[String]("inputSavedTxFile"),
+             trackTitle = parser.get[String]("trackTitle")
          ).run();
        }
      }
   }
   
   case class CodingCoverageStats(infile : String, outfileprefix :String, isSingleEnd : Boolean, 
-                                 onTargetBed : Option[String], inputSavedTxFile : String, chromLengthFile : Option[String] = None){
+                                 onTargetBed : Option[String], inputSavedTxFile : String, 
+                                 trackTitle : String = "bpcoverage",
+                                 windowCt : Int = 2000,
+                                 spannedWindowSize : Int = 1000,
+                                 chromLengthFile : Option[String] = None){
     
     val BED_FILE_INTERNAL_TAG = "ON_TARGET_BED_FILE"
     
@@ -132,120 +144,142 @@ object makeBedWiggle {
             tx
           }}.toVector
     }
-    var currChrom : String = iter.head._1.getContig();
-    var txArray = GenomicArrayOfSets[String](false);
-    var codingArray = GenomicArrayOfSets[String](false);
-    TXSeq.withFilter(tx => {tx.chrom == currChrom} ).foreach{ tx => {
-      tx.gSpans.foreach{ case (start,end) => {
-              txArray.addSpan(GenomicInterval(chromName = tx.chrom, strand = '.', start = start, end = end), tx.txID);
-      }}
-      tx.gSpansCDS.foreach{ case (start,end) => {
-              codingArray.addSpan(GenomicInterval(chromName = tx.chrom, strand = '.', start = start, end = end), tx.txID);
-      }}
-    }}
-    targetBedIv match {
-      case Some(tbiv) => {
-        tbiv.withFilter{ case (chrom,start,end) => { chrom == currChrom}}.foreach{ case (chrom,start,end) => {
-          val iv = GenomicInterval(chromName = chrom, strand = '.', start = start, end = end)
-          txArray.addSpan(iv, BED_FILE_INTERNAL_TAG);
-          codingArray.addSpan(iv,BED_FILE_INTERNAL_TAG);
-        }}
-      }
-      case None => {
-        //do nothing!
-      }
-    }
-    txArray.finalizeStepVectors;
-    codingArray.finalizeStepVectors;
-    var stepCountArrays = txArray.getSteps(currChrom,'.').withFilter{ case (iv,txset) => onTargetFilter(txset)}.map{ case (iv,txset) => {
-      (iv,(txset,Array.fill(iv.end - iv.start)(0)))
-    }}.toMap;
-    var codingStepCountArrays = codingArray.getSteps(currChrom,'.').withFilter{ case (iv,txset) => onTargetFilter(txset)}.map{ case (iv,txset) => {
-      (iv,(txset,Array.fill(iv.end - iv.start)(0)))
-    }}.toMap;
     
     val totalCounts_tx = Array.fill(coverageThresholds.length)(0);
     val totalCounts_cd = Array.fill(coverageThresholds.length)(0);  
     
-    def run(){
-      reportln("Initializing output files ["+getDateAndTimeString+"]","note");
-      val txOut = openWriterSmart(outfileprefix + "gene.baseDepths.txt.gz");
-      val cdOut = openWriterSmart(outfileprefix + "cds.baseDepths.txt.gz");
-      val summaryOutTx = openWriterSmart(outfileprefix + "gene.depthSummaryByChrom.txt");
-      val summaryOutCd = openWriterSmart(outfileprefix + "cds.depthSummaryByChrom.txt");
-      summaryOutTx.write("chrom"+"\t"+coverageThresholds.init.map{ case (ts,te) => if(ts+1==te) ts else ts+"to"+(te-1)}.mkString("\t")+"\tge"+coverageThresholds.last._1+"\n");
-      summaryOutCd.write("chrom"+"\t"+coverageThresholds.init.map{ case (ts,te) => if(ts+1==te) ts else ts+"to"+(te-1)}.mkString("\t")+"\tge"+coverageThresholds.last._1+"\n");
+    case class ChromDataHolder(chr : String){
+      var txArray = GenomicArrayOfSets[String](false);
+      var codingArray = GenomicArrayOfSets[String](false);
+      TXSeq.withFilter(tx => {tx.chrom == chr} ).foreach{ tx => {
+        tx.gSpans.foreach{ case (start,end) => {
+                txArray.addSpan(GenomicInterval(chromName = tx.chrom, strand = '.', start = start, end = end), tx.txID);
+        }}
+        tx.gSpansCDS.foreach{ case (start,end) => {
+                codingArray.addSpan(GenomicInterval(chromName = tx.chrom, strand = '.', start = start, end = end), tx.txID);
+        }}
+      }}
+      targetBedIv match {
+        case Some(tbiv) => {
+          tbiv.withFilter{ case (chrom,start,end) => { chrom == chr}}.foreach{ case (chrom,start,end) => {
+            val iv = GenomicInterval(chromName = chrom, strand = '.', start = start, end = end)
+            txArray.addSpan(iv, BED_FILE_INTERNAL_TAG);
+            codingArray.addSpan(iv,BED_FILE_INTERNAL_TAG);
+          }}
+        }
+        case None => {
+          //do nothing!
+        }
+      }
+      txArray.finalizeStepVectors;
+      codingArray.finalizeStepVectors;
+      var stepCountArrays = txArray.getSteps(chr,'.').withFilter{ case (iv,txset) => onTargetFilter(txset)}.map{ case (iv,txset) => {
+        (iv,(txset,Array.fill(iv.end - iv.start)(0)))
+      }}.toMap;
+      var codingStepCountArrays = codingArray.getSteps(chr,'.').withFilter{ case (iv,txset) => onTargetFilter(txset)}.map{ case (iv,txset) => {
+        (iv,(txset,Array.fill(iv.end - iv.start)(0)))
+      }}.toMap;
+      var ivlist_tx =  txArray.getSteps(chr,'.').withFilter{ case (iv,txset) => onTargetFilter(txset)}.map{ case (iv,txset) => iv }.toList
+      var ivlist_cd =  codingArray.getSteps(chr,'.').withFilter{ case (iv,txset) => onTargetFilter(txset)}.map{ case (iv,txset) => iv }.toList
+      var chromWindowSums_cds = Array.fill(windowCt)(0);
+      var chromSize = ivlist_cd.map(iv => iv.end - iv.start).sum;
+      var windowSize = chromSize / windowCt + 1;
       
-      reportln("Starting iteration ["+getDateAndTimeString+"]","note");
-      for((r1,r2) <- iter){
-        if((! r1.getReadUnmappedFlag()) && (! r1.getReadFailsVendorQualityCheckFlag()) && (! r2.getReadUnmappedFlag()) && (! r2.getReadFailsVendorQualityCheckFlag()) && r1.getAlignmentBlocks().size() != 0 && r2.getAlignmentBlocks().size() != 0){
-          if(r1.getContig() != currChrom){
-            reportln("writing chrom: " + currChrom + " [" + getDateAndTimeString+"]","note");
+      var spannedWindowSums_cds = Array.fill(chromSize / spannedWindowSize + 1)(0)
+      /*var chromWindowSums_cds = ivlist_cd.tail.foldLeft(Vector(ivlist_cd.head)){case (soFar,iv) => {
+        if(soFar.last.end == iv.start){
+          soFar.init :+ GenomicInterval(chromName = iv.chromName, strand = '.', start = soFar.last.start, end = iv.end)
+        } else {
+          soFar :+ iv
+        }
+      }}.map{ iv => {
+        
+      }}*/
+      
+      def writeChrom(txOut : internalUtils.fileUtils.WriterUtil,
+                     cdOut : internalUtils.fileUtils.WriterUtil,
+                     summaryOutTx : internalUtils.fileUtils.WriterUtil,
+                     summaryOutCd : internalUtils.fileUtils.WriterUtil,
+                     cdWindows : internalUtils.fileUtils.WriterUtil,
+                     spannedCdWindows :  internalUtils.fileUtils.WriterUtil){
+            reportln("writing chrom: " + chr + " [" + getDateAndTimeString+"]","note");
             val currChromCounts_tx = Array.fill(coverageThresholds.length)(0);
             val currChromCounts_cd = Array.fill(coverageThresholds.length)(0);
             
-            stepCountArrays.foreach{ case (iv,(txset,countArray)) => {
+            ivlist_tx.map{ iv => (iv, stepCountArrays(iv)) }.foreach{ case (iv,(txset,countArray)) => {
               txOut.write("#"+"\t"+iv.chromName+"\t"+iv.start +"\t"+iv.end+"\t"+txset.filter(tx => tx != BED_FILE_INTERNAL_TAG).toVector.sorted.mkString(",")+"\n");
+              txOut.write("fixedStep chrom="+iv.chromName+" start="+(iv.start+1)+" step=1\n");
               txOut.write(countArray.mkString("\n")+"\n");
               countArray.foreach{ct => {
                 coverageThresholds.zipWithIndex.foreach{ case ((ts,te),i) => { if(ct < te && ct >= ts) currChromCounts_tx(i) += 1 }}
               }}
             }}
-            codingStepCountArrays.foreach{ case (iv,(txset,countArray)) => {
+            var currPos = 0;
+            ivlist_cd.map{ iv => (iv, codingStepCountArrays(iv)) }.foreach{ case (iv,(txset,countArray)) => {
               cdOut.write("#"+"\t"+iv.chromName+"\t"+iv.start +"\t"+iv.end+"\t"+txset.filter(tx => tx != BED_FILE_INTERNAL_TAG).toVector.sorted.mkString(",")+"\n");
+              cdOut.write("fixedStep chrom="+iv.chromName+" start="+(iv.start+1)+" step=1\n");
               cdOut.write(countArray.mkString("\n")+"\n");
               countArray.foreach{ct => {
                 coverageThresholds.zipWithIndex.foreach{ case ((ts,te),i) => { if(ct < te && ct >= ts) currChromCounts_cd(i) += 1 }}
+                chromWindowSums_cds(currPos / windowSize) += ct;
+                spannedWindowSums_cds(currPos / spannedWindowSize) += ct;
+                currPos += 1;
               }}
             }}
+            
             currChromCounts_tx.indices.foreach{i => totalCounts_tx(i) += currChromCounts_tx(i)}
             currChromCounts_cd.indices.foreach{i => totalCounts_cd(i) += currChromCounts_cd(i)}
-            summaryOutTx.write(currChrom+"\t"+currChromCounts_tx.mkString("\t")+"\n");
-            summaryOutCd.write(currChrom+"\t"+currChromCounts_cd.mkString("\t")+"\n");
+            summaryOutTx.write(chr+"\t"+currChromCounts_tx.mkString("\t")+"\n");
+            summaryOutCd.write(chr+"\t"+currChromCounts_cd.mkString("\t")+"\n");
+            cdWindows.write(chr+"\t"+chromWindowSums_cds.map{ct => ct.toDouble / windowSize.toDouble}.mkString("\t")+"\n");
+            spannedWindowSums_cds.zipWithIndex.foreach{ case (ct,idx) => {
+              spannedCdWindows.write(chr+"\t"+idx+"\t"+ct.toDouble / spannedWindowSize.toDouble+"\n")
+            }}
+            //spannedWindowSums_cds
             summaryOutTx.flush();
             summaryOutCd.flush();
-            
+            cdWindows.flush();
+            spannedCdWindows.flush();
+      }
+    }
+    var currChrom : String = iter.head._1.getContig();
+    var cdata = ChromDataHolder(currChrom);
+
+    def run(){
+      reportln("Initializing output files ["+getDateAndTimeString+"]","note");
+      val txOut = openWriterSmart(outfileprefix + "gene.baseDepths.txt.gz");
+      val cdOut = openWriterSmart(outfileprefix + "cds.baseDepths.txt.gz");
+      txOut.write("track type=wiggle_0 name="+trackTitle+"_Genic\n");
+      cdOut.write("track type=wiggle_0 name="+trackTitle+"_CDS\n");
+      val summaryOutTx = openWriterSmart(outfileprefix + "gene.depthSummaryByChrom.txt");
+      val summaryOutCd = openWriterSmart(outfileprefix + "cds.depthSummaryByChrom.txt");
+      summaryOutTx.write("chrom"+"\t"+coverageThresholds.init.map{ case (ts,te) => if(ts+1==te) ts else ts+"to"+(te-1)}.mkString("\t")+"\tge"+coverageThresholds.last._1+"\n");
+      summaryOutCd.write("chrom"+"\t"+coverageThresholds.init.map{ case (ts,te) => if(ts+1==te) ts else ts+"to"+(te-1)}.mkString("\t")+"\tge"+coverageThresholds.last._1+"\n");
+      
+      val cdWindows = openWriterSmart(outfileprefix + "cds.windowedDepths.equalNumWindows.txt");
+      cdWindows.write("chrom\t"+Range(0,windowCt).mkString("\t")+"\n");
+      val spannedCdWindows = openWriterSmart(outfileprefix + "cds.windowedDepths.equalSizeWindows.txt");
+      spannedCdWindows.write("chrom\tindex\tct\n");
+      
+      reportln("Starting iteration ["+getDateAndTimeString+"]","note");
+      for((r1,r2) <- iter){
+        if((! r1.getReadUnmappedFlag()) && (! r1.getReadFailsVendorQualityCheckFlag()) && (! r2.getReadUnmappedFlag()) && (! r2.getReadFailsVendorQualityCheckFlag()) && r1.getAlignmentBlocks().size() != 0 && r2.getAlignmentBlocks().size() != 0){
+          if(r1.getContig() != currChrom){
+            /////////////////////////////////////////////////////////////////////////
+            cdata.writeChrom(txOut=txOut ,  cdOut=cdOut , summaryOutTx=summaryOutTx, summaryOutCd=summaryOutCd ,cdWindows =cdWindows,spannedCdWindows=spannedCdWindows)
+            /////////////////////////////////////////////////////////////////////////
             reportln("Switching to chrom: " + r1.getContig()+ " [" + getDateAndTimeString+"]","note");
             currChrom = r1.getContig();
-            txArray = GenomicArrayOfSets[String](false);
-            codingArray = GenomicArrayOfSets[String](false);
-            TXSeq.withFilter(tx => {tx.chrom == currChrom} ).foreach{ tx => { 
-              tx.gSpans.foreach{ case (start,end) => {
-                  txArray.addSpan(GenomicInterval(chromName = tx.chrom, strand = '.', start = start, end = end), tx.txID);
-              }}
-              tx.gSpansCDS.foreach{ case (start,end) => {
-                  codingArray.addSpan(GenomicInterval(chromName = tx.chrom, strand = '.', start = start, end = end), tx.txID);
-              }}
-            }}
-            targetBedIv match {
-              case Some(tbiv) => {
-                tbiv.withFilter{ case (chrom,start,end) => { chrom == currChrom}}.foreach{ case (chrom,start,end) => {
-                  val iv = GenomicInterval(chromName = chrom, strand = '.', start = start, end = end)
-                  txArray.addSpan(iv, BED_FILE_INTERNAL_TAG);
-                  codingArray.addSpan(iv,BED_FILE_INTERNAL_TAG);
-                }}
-              }
-              case None => {
-                //do nothing!
-              }
-            }
-            txArray.finalizeStepVectors;
-            codingArray.finalizeStepVectors
-            stepCountArrays = txArray.getSteps(currChrom,'.').withFilter{ case (iv,txset) => onTargetFilter(txset)}.map{ case (iv,txset) => {
-              (iv,(txset,Array.fill(iv.end - iv.start)(0)))
-            }}.toMap;
-            codingStepCountArrays = codingArray.getSteps(currChrom,'.').withFilter{ case (iv,txset) => onTargetFilter(txset)}.map{ case (iv,txset) => {
-              (iv,(txset,Array.fill(iv.end - iv.start)(0)))
-            }}.toMap;
+            cdata = ChromDataHolder(currChrom);
           }
           
           val blocks = getOverlappedPairBlocks(r1,r2);
           blocks.foreach{ case (start,end) => {
             val iv = GenomicInterval(chromName = currChrom,strand='.',start=start,end=end);
-            val txSteps = txArray.findIntersectingSteps(iv);
-            val cdSteps = codingArray.findIntersectingSteps(iv);
+            val txSteps = cdata.txArray.findIntersectingSteps(iv);
+            val cdSteps = cdata.codingArray.findIntersectingSteps(iv);
             txSteps.withFilter{ case (iv,txset) => onTargetFilter(txset)}.foreach{ case (stepIV,stepTxSet) => {
-              val stepCts = stepCountArrays(stepIV)._2;
+              val stepCts = cdata.stepCountArrays(stepIV)._2;
               val from = if(iv.start > stepIV.start) iv.start - stepIV.start else 0;
               val to = if(iv.end < stepIV.end) stepCts.length - (stepIV.end - iv.end) else stepCts.length;
               Range(from,to).foreach{ i => {
@@ -253,7 +287,7 @@ object makeBedWiggle {
               }}
             }}
             cdSteps.withFilter{ case (iv,txset) => onTargetFilter(txset)}.foreach{ case (stepIV,stepTxSet) => {
-              val stepCts = codingStepCountArrays(stepIV)._2;
+              val stepCts = cdata.codingStepCountArrays(stepIV)._2;
               val from = if(iv.start > stepIV.start) iv.start - stepIV.start else 0;
               val to = if(iv.end < stepIV.end) stepCts.length - (stepIV.end - iv.end) else stepCts.length;
               Range(from,to).foreach{ i => {
@@ -263,6 +297,9 @@ object makeBedWiggle {
           }}
         }
       }
+      cdata.writeChrom(txOut=txOut ,  cdOut=cdOut , summaryOutTx=summaryOutTx, summaryOutCd=summaryOutCd ,cdWindows =cdWindows,spannedCdWindows=spannedCdWindows)
+      
+      
       reportln("Finished iteration ["+getDateAndTimeString+"]","note");
 
       summaryOutTx.write("TOTAL"+"\t"+totalCounts_tx.mkString("\t")+"\n");
@@ -277,12 +314,12 @@ object makeBedWiggle {
       summaryOutTx.write("Cumulative"+"\t"+cumsumcd.mkString("\t")+"\n");
       summaryOutTx.write("CumulativePct"+"\t"+cumsumcd.map{_.toDouble / totalCounts_cd.sum.toDouble}.mkString("\t")+"\n");
       
-          
+      cdWindows.close(); 
       summaryOutTx.close();
       summaryOutCd.close();
       txOut.close();
       cdOut.close();
-      
+      spannedCdWindows.close();
     } //end run() method
   }
   
