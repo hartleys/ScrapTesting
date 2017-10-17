@@ -458,7 +458,8 @@ object VcfAnnotateTX {
                               sampleDecoder : Option[String],
                               filterExpression1: Option[String],
                               filterExpression2 : Option[String],
-                              bedFile : Option[String] = None){
+                              bedFile : Option[String] = None,
+                              debugMode : Boolean = true){
     
     val bedFilter : Option[(SVcfVariantLine => Boolean)] = bedFile match {
       case Some(f) => {
@@ -533,6 +534,14 @@ object VcfAnnotateTX {
     }
     
     val matchIdxIdx = matchIdx.indices;
+    
+    if(debugMode){
+      reportln("MATCHES:","debug");
+      matchIdx.foreach{case (matchName,idx1,idx2) => {
+        reportln("   "+matchName+"\t"+idx1+"\t"+idx2,"debug")
+      }}
+    }
+    
     /*
      * A>C, T>G
      * A>T, T>A
@@ -921,7 +930,7 @@ object VcfAnnotateTX {
         mmCountFunctionList_A.foreach{ case (id,arr,varFcn,fcn) => {
           if(varFcn(vco)){
             matchIdxIdx.foreach{ i => {
-              if(fcn(vc,idx,i)) arr(i) += 1;
+              if(fcn(vco,idx,i)) arr(i) += 1;
             }}
           }
         }}
@@ -944,7 +953,7 @@ object VcfAnnotateTX {
         mmCountFunctionList_B.foreach{ case (id,arr,varFcn,fcn) => {
           if(varFcn(vco)){
             matchIdxIdx.foreach{ i => {
-              if(fcn(vc,idx,i)) arr(i) += 1;
+              if(fcn(vco,idx,i)) arr(i) += 1;
             }}
           }
         }}

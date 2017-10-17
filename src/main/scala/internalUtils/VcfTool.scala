@@ -761,7 +761,10 @@ object VcfTool {
       var formatLines = Seq[SVcfCompoundHeaderLine]();
       var otherHeaderLines = Seq[SVcfHeaderLine]();
       
-      lines.init.foreach(line => {
+      val (tagLines, nonTagLines) = lines.partition(line => line.startsWith("##"));
+      
+      
+      tagLines.foreach(line => {
         if(line.startsWith("##INFO=")){
           infoLines = infoLines :+ makeCompoundLineFromString(line);
         } else if(line.startsWith("##FORMAT=")){
@@ -770,7 +773,11 @@ object VcfTool {
           otherHeaderLines = otherHeaderLines :+ makeSimpleHeaderLineFromString(line);
         }
       })
-      val titleLine = SVcfTitleLine(lines.last.split("\t").drop(9));
+      if(nonTagLines.length != 1){
+         warning("VCF header line malformed? Found multiple header rows that do not start with \"##\""+ nonTagLines.map{line => "        \""+line+"\""}.mkString("\n"),"MALFORMED_VCF_HEADER_LINE",100);
+      }
+      
+      val titleLine = SVcfTitleLine(nonTagLines.filter{_.startsWith("#CHROM")}.head.split("\t").drop(9));
       
       SVcfHeader(infoLines, formatLines, otherHeaderLines, titleLine);
     }
@@ -1092,15 +1099,17 @@ object VcfTool {
       val indata = if(inputFileList){
         val (infilePeek,infiles) = peekIterator(getLinesSmartUnzip(infileString),1000);
         val denominator = if(infilePeek.length < 1000) infilePeek.length.toString else "???";
+        val headerLines = extractWhile(getLinesSmartUnzip(infilePeek.head).buffered)( a => a.startsWith("#") )
         val allInputLines = flattenIterators(infiles.zipWithIndex.map{case (inf,idx) => addIteratorCloseAction(iter =getLinesSmartUnzip(inf), closeAction = (() => {reportln("finished reading file: "+inf + "("+getDateAndTimeString+")" + "("+(idx+1)+"/"+denominator+")","note")}))}).buffered
-        val headerLines = extractWhile(allInputLines)( a => a.startsWith("#"));
+        //val headerLines = extractWhile(allInputLines)( a => a.startsWith("#"));
         val remainderLines = allInputLines.filter( a => ! a.startsWith("#"));
         headerLines.iterator ++ remainderLines;
       } else if(infileString.contains(',')){
         val infiles = infileString.split(",");
         val denominator = infiles.length.toString;
+        val headerLines = extractWhile(getLinesSmartUnzip(infiles.head).buffered)( a => a.startsWith("#") )
         val allInputLines = flattenIterators(infiles.iterator.zipWithIndex.map{case (inf,idx) => addIteratorCloseAction(iter =getLinesSmartUnzip(inf), closeAction = (() => {reportln("finished reading file: "+inf + "("+getDateAndTimeString+")"+  "("+(idx+1)+"/"+denominator+")","note")}))}).buffered
-        val headerLines = extractWhile(allInputLines)( a => a.startsWith("#"));
+        //val headerLines = extractWhile(allInputLines)( a => a.startsWith("#"));
         val remainderLines = allInputLines.filter( a => ! a.startsWith("#"));
         headerLines.iterator ++ remainderLines;
       } else {
