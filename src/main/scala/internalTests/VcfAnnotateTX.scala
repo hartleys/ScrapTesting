@@ -692,7 +692,7 @@ object VcfAnnotateTX {
       vc.genotypes.genotypeValues(idx1)(i) != vc.genotypes.genotypeValues(idx2)(i) && isCalled(vc,idx1,i) && isCalled(vc,idx2,i)
     }
     def isSNV(vc : SVcfVariantLine) : Boolean = {
-      vc.ref.length == vc.alt.length && vc.ref.length == 1
+      vc.ref.length == vc.alt.head.length && vc.ref.length == 1
     }
     def isRef(vc : SVcfVariantLine, idx : Int, i : Int) : Boolean = {
        vc.genotypes.genotypeValues(idx)(i) == "0/0";

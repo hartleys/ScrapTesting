@@ -588,7 +588,8 @@ object SamTool {
       }
     }
   }
-
+  
+  
 
   private def getSRPairIterResorted(iter : Iterator[SAMRecord], strict : Boolean = true) : Iterator[(SAMRecord,SAMRecord)] = {
     reportln("Starting getSRPairIterResorted...","debug");
@@ -596,17 +597,29 @@ object SamTool {
     val initialPairContainerWarningSize = 100000;
     val warningSizeMultiplier = 2;
     
+    var lnct = 0;
+    
     if(! iter.hasNext){
       return(Iterator[(SAMRecord,SAMRecord)]());
     } else {
       return new Iterator[(SAMRecord,SAMRecord)] {
-        val pairContainer = scala.collection.mutable.AnyRefMap[String,SAMRecord]();
+        val pairContainer = scala.collection.mutable.HashMap[String,SAMRecord]();
+              reportln("    INIT STATUS:  " +pairContainer.size + ", "+pairContainer.keySet.size + ", "+pairContainer.keySet.toList.size+"\n"+
+                       "       CONTENTS: '"+pairContainer.keySet.toList.take(10).mkString(",")+"'","debug");
         //NOTE: The above container type should never contain more than 500 million reads. If this is a problem, then something is terribly wrong.
         var pairContainerWarningSize = initialPairContainerWarningSize;
         var bufferWarningSize = initialPairContainerWarningSize;
         
-        var buffer = scala.collection.mutable.AnyRefMap[String,(SAMRecord,SAMRecord)]();
+        var buffer = scala.collection.mutable.HashMap[String,(SAMRecord,SAMRecord)]();
         var readOrder = Vector[String]();
+        
+        var pairContainerOpHistory = Vector[String]();
+        def updateOpHistory(op : String){
+          pairContainerOpHistory = pairContainerOpHistory :+ op
+          if(pairContainerOpHistory.length > 100){
+            pairContainerOpHistory = pairContainerOpHistory.tail;
+          }
+        }
         
         def bufferHasNext : Boolean = iter.hasNext;
         def addNextPairToBuffer {
@@ -627,6 +640,16 @@ object SamTool {
                            "    does not adhere to the standard SAM specification.)", "note");
                 }
                 pairContainerWarningSize = pairContainerWarningSize * warningSizeMultiplier;
+            }
+            lnct += 1;
+            //if(lnct % 10000 == 0){
+            //  reportln("    STATUS: " +pairContainer.size + ", "+pairContainer.keySet.size + ", "+pairContainer.keySet.toList.size+"\n"+
+            //           "  CONTENTS: '"+pairContainer.keySet.toList.take(10).mkString(",")+"'","debug");
+            //}
+            //updateOpHistory("Add["+curr.getReadName()+"]");
+            if(pairContainer.size != pairContainer.keySet.toList.size){
+              warning("Impossible Paircontainer status! pairContainer.size != pairContainer.keySet.toList.size"+
+                      "     Just added read: "+curr.getReadName() + " to pairContainer.\n","Impossible_Paircontainer_State",10)
             }
             curr = iter.next;            
           }
@@ -649,6 +672,12 @@ object SamTool {
               }
           }
           val rB = pairContainer.remove(curr.getReadName()).get;
+          //updateOpHistory("Del["+curr.getReadName()+"]");
+
+          if(pairContainer.size != pairContainer.keySet.toList.size){
+              warning("Impossible pairContainer status! pairContainer.size != pairContainer.keySet.toList.size"+
+                      "     Just removed read: "+curr.getReadName() + " from pairContainer.","Impossible_Paircontainer_State",10)
+          }
           
           if(curr.getFirstOfPairFlag()) buffer.put(curr.getReadName(),(curr,rB))
           else buffer.put(curr.getReadName(),(rB,curr))
@@ -671,17 +700,18 @@ object SamTool {
           while(iter.hasNext && (! buffer.containsKey(nextName))){
             addNextPairToBuffer;
             if(bufferWarningSize < buffer.size){
-                reportln("NOTE: Unmatched Read-PAIR-Buffer Size > "+bufferWarningSize+" [Mem usage:"+MemoryUtil.memInfo+"]","note");
+                reportln("NOTE: Unmatched Read-PAIR-Buffer Size > "+bufferWarningSize+" [Mem usage:"+MemoryUtil.memInfo+"]\n"+
+                         "  Currently searching for read: " + nextName + " for "+searchCt + " iterations."+
+                         "  Current pairContainer status: "+pairContainer.size+", "+pairContainer.keySet.size+", "+pairContainer.keySet.toList.size,"note");
                 if(bufferWarningSize == initialPairContainerWarningSize){
                   reportln("    (This is generally not a problem, but if this increases further then OutOfMemoryExceptions\n"+
                            "    may occur.\n"+
-                           "    If memory errors do occur, either increase memory allocation or sort the bam-file by name\n"+
-                           "    and rerun with the '--nameSorted' option.\n"+
+                           "    If memory errors do occur, increase memory allocation.\n"+
                            "    This might also indicate that your dataset contains an unusually large number of\n"+
                            "    chimeric read-pairs. Or it could occur simply due to the presence of genomic\n"+
-                           "    loci with extremly high coverage or complex splicing. It may also indicate a SAM/BAM file that \n"+
-                           "    does not adhere to the standard SAM specification.)\n"+
-                           "  Currently searching for read: " + nextName + " for "+searchCt + " iterations.", "note");
+                           "    loci with extremly high coverage, large and complex splicing/indels, or other oddities.\n"+
+                           "    It may also indicate a SAM/BAM file that \n"+
+                           "    does not adhere to the standard SAM specification.)", "note");
                 }
                 bufferWarningSize = bufferWarningSize * warningSizeMultiplier;
             }
@@ -693,8 +723,14 @@ object SamTool {
                                            "which are marked as having a mapped pair, but no "+
                                            "corresponding pair is found in the bam file. \n"+
                                            "(Example Orphaned Read Name: "+nextName+")\n"+
-                                           "Recent reads:\n"+
-                                           "    "+readHistory.mkString("\n    ")
+                                           "Recent read-pairs:\n"+
+                                           "    "+readHistory.mkString("\n    ")+"\n"+
+                                           "Contents of unpaired read buffer (up to 100): (keySet.size="+pairContainer.keySet.size +", keySet.toList.size="+pairContainer.keySet.toList.size+")\n"+
+                                           "    '"+pairContainer.keySet.mkString(",")+"'"+"\n"+
+                                           "pairContainer.keySet.toString():\n"+
+                                           "    '"+pairContainer.keySet.toString()+"'\n"+
+                                           "pairContainer.size = "+pairContainer.size+"\n"+
+                                           "pairContainer.toString() = '"+pairContainer.toString()+"'"
                                            );
           }
           
