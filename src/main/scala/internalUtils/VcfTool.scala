@@ -1058,7 +1058,7 @@ object VcfTool {
       }
       (vcIter2,vcfHeader);
   }
-  def getSVcfIterators(infileString : String, chromList : Option[List[String]],numLinesRead : Option[Int], inputFileList : Boolean = false) : (Iterator[SVcfVariantLine],SVcfHeader) = {
+  def getSVcfIterators(infileString : String, chromList : Option[List[String]],numLinesRead : Option[Int], inputFileList : Boolean = false, withProgress : Boolean = true) : (Iterator[SVcfVariantLine],SVcfHeader) = {
       val indata = if(inputFileList){
         val infiles = getLinesSmartUnzip(infileString)
         val allInputLines = flattenIterators(infiles.map{inf => addIteratorCloseAction(iter =getLinesSmartUnzip(inf), closeAction = (() => {reportln("finished reading file: "+inf,"note")}))}).buffered
@@ -1076,15 +1076,15 @@ object VcfTool {
       }
     
     val (vcfHeader,vcIter) = if(chromList.isEmpty){
-        SVcfLine.readVcf(indata,withProgress = true)
+        SVcfLine.readVcf(indata,withProgress = withProgress)
       } else if(chromList.get.length == 1){
         val chrom = chromList.get.head;
         SVcfLine.readVcf(indata.filter{line => {
           line.startsWith(chrom+"\t") || line.startsWith("#")
-        }},withProgress = true)
+        }},withProgress = withProgress)
       } else {
         val chromSet = chromList.get.toSet;
-        val (vh,vi) = SVcfLine.readVcf(indata,withProgress = true)
+        val (vh,vi) = SVcfLine.readVcf(indata,withProgress = withProgress)
         (vh,vi.filter(line => { chromSet.contains(line.chrom) }))
       }
       
@@ -1095,6 +1095,7 @@ object VcfTool {
       }
       (vcIter2,vcfHeader);
   }
+  
   abstract class SVcfWalker {
     def walkVCF(vcIter : Iterator[SVcfVariantLine], vcfHeader : SVcfHeader, verbose : Boolean = true) : (Iterator[SVcfVariantLine],SVcfHeader)
     def walkVCFFile(infile :String, outfile : String, chromList : Option[List[String]], numLinesRead : Option[Int]){

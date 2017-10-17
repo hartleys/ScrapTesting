@@ -754,14 +754,6 @@ case class TXUtil(geneID : String, txID : String, chrom : String, strand : Char,
 
             
           }
-        } else if(gSpans.exists{case (s,e) => { gVarStart > s && gVarStart < e}} && gSpans.exists{case (s,e) => { gVarEnd > s && gVarEnd < e}}){
-          //in/del starts and ends on different exons:
-          //return ("p.?[FullIntronInsOrDel"+(lastUnchangedCodonNum+1)+"]",vType+"_UNK_FullIntronIndel");
-          return pVarInfo("p.?[FullIntronInsOrDel"+(lastUnchangedCodonNum+1)+"]",lastUnchangedCodonNum,lastUnchangedCodonNum,"",vType,"UNK","FullIntronIndel","FullIntronIndel");
-        } else if(gSpans.exists{case (s,e) => { gVarStart <= s && gVarEnd >= e}}){
-          //in/del deletes or replaces an entire exon
-          //return ("p.?[FullExonInsOrDel"+(lastUnchangedCodonNum+1)+"]",vType+"_PLOF_FullExonIndel");
-          return pVarInfo("p.?[FullExonInsOrDel"+(lastUnchangedCodonNum+1)+"]",lastUnchangedCodonNum,lastUnchangedCodonNum,"",vType,"PLOF","FullExonIndel","FullExonIndel");
         } else if(gVarStart < gCdsStart && gVarEnd > gCdsStart){
           //if(strand == '+') return("p.?[IndelStartSite]",vType+"_PLOF_START-LOSS_startIndel");
           //else              return("p.?[IndelStopSite]", vType+"_NONSYNON_STOP-LOSS_stopIndel");
@@ -772,6 +764,14 @@ case class TXUtil(geneID : String, txID : String, chrom : String, strand : Char,
           //else              return("p.?[IndelStartSite]",vType+"_PLOF_START-LOSS_startIndel");
           if(strand == '-') return pVarInfo("p.?[IndelStartSite]",lastUnchangedCodonNum,lastUnchangedCodonNum,"",vType,"PLOF","START-LOSS","startIndel");
           else              return pVarInfo("p.?[IndelStopSite]", lastUnchangedCodonNum,lastUnchangedCodonNum,"",vType,"NONSYNON","STOP-LOSS","stopIndel");
+        } else if(gSpans.exists{case (s,e) => { gVarStart > s && gVarStart < e}} && gSpans.exists{case (s,e) => { gVarEnd > s && gVarEnd < e}}){
+          //in/del starts and ends on different exons:
+          //return ("p.?[FullIntronInsOrDel"+(lastUnchangedCodonNum+1)+"]",vType+"_UNK_FullIntronIndel");
+          return pVarInfo("p.?[FullIntronInsOrDel"+(lastUnchangedCodonNum+1)+"]",lastUnchangedCodonNum,lastUnchangedCodonNum,"",vType,"UNK","FullIntronIndel","FullIntronIndel");
+        } else if(gSpans.exists{case (s,e) => { gVarStart <= s && gVarEnd >= e}}){
+          //in/del deletes or replaces an entire exon
+          //return ("p.?[FullExonInsOrDel"+(lastUnchangedCodonNum+1)+"]",vType+"_PLOF_FullExonIndel");
+          return pVarInfo("p.?[FullExonInsOrDel"+(lastUnchangedCodonNum+1)+"]",lastUnchangedCodonNum,lastUnchangedCodonNum,"",vType,"PLOF","FullExonIndel","FullExonIndel");
         } else if(gVarEnd <= gCdsStart){
           //if(strand == '+') return("p.?[Indel5primeEnd]",vType+"_UNK_UTR-5");
           //else              return("p.?[Indel3primeEnd]",vType+"_UNK_UTR-3");
