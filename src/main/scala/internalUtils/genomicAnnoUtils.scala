@@ -718,12 +718,9 @@ object genomicAnnoUtils {
        val strandStranded = if(isStranded) strand else '.';
        gsvMap.get((chromName, strandStranded)) match {
             case Some(gsv : GenomicStepVector[B]) => {
-              val out = gsv.findWhollyContainedSteps(pos,pos+1);
-              if(out.hasNext){
-                return Set[B]();
-              } else {
-                out.next._2
-              }
+              gsv.findIntersectingSteps(pos,pos+1).foldLeft(Set[B]()){ case (soFar,(iv,currSet)) => {
+                soFar ++ currSet
+              }}
             }
             case None => return Set[B]();
           }

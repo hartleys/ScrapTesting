@@ -482,7 +482,7 @@ object VcfAnnotateTX {
             arr.finalizeStepVectors;
             Some(((vc : SVcfVariantLine) => {
               val iv = internalUtils.commonSeqUtils.GenomicInterval(vc.chrom,'.', start = vc.pos - 1, end = math.max(vc.pos,vc.pos + vc.ref.length - 1));
-              arr.findWhollyContainedSteps(iv).exists{ case (iv, currSet) => { ! currSet.isEmpty }}
+              arr.findIntersectingSteps(iv).exists{ case (iv, currSet) => { ! currSet.isEmpty }}
             }))
       }
       case None => {
