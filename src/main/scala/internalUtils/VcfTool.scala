@@ -82,6 +82,7 @@ object VcfTool {
         splitIdx_TAG     : String = TOP_LEVEL_VCF_TAG+"splitIdx",
         numSplit_TAG     : String = TOP_LEVEL_VCF_TAG+"numSplit",
         splitAlle_TAG     : String = TOP_LEVEL_VCF_TAG+"fullAlleList",
+        splitAlleWARN_TAG : String = TOP_LEVEL_VCF_TAG+"splitAlleWarn",
         
         assess_IsRepetitive : String = TOP_LEVEL_VCF_TAG+"locusIsRep",
         assess_IsConserved : String = TOP_LEVEL_VCF_TAG+"locusIsCons",
@@ -244,16 +245,24 @@ object VcfTool {
     
     def walkVCFFiles(infile : String, outfile : String, chromList : Option[List[String]], infileList : Boolean, vcfCodes : VCFAnnoCodes = VCFAnnoCodes(), verbose : Boolean = true) {
       if(infileList){
+        val chromSet = chromList match {
+          case Some(lst) => Some(lst.toSet);
+          case None => None;
+        }
         val (peekList,fileiter) = peekIterator(getLinesSmartUnzip(infile),1000);
         val denominator = if(peekList.length == 1000) "?" else peekList.length.toString;
-        val (firstIter,vcfHeader) = internalUtils.VcfTool.getVcfIterator(peekList.head, 
-                                       chromList = chromList,
-                                       vcfCodes = vcfCodes);
-        val vcIter = firstIter ++ fileiter.drop(1).flatMap{file => {
-          internalUtils.VcfTool.getVcfIterator(file, 
-                                       chromList = chromList,
-                                       vcfCodes = vcfCodes)._1;
+        val readerIter = fileiter.map{ file => {
+          val vcfReader = new VCFFileReader(new File(file),false);
+          (file,vcfReader)
+        }}.buffered
+        val vcfHeader = readerIter.head._2.getFileHeader();
+        
+        val iteriter = readerIter.zipWithIndex.map{case ((file,vcfReader),idx) => {
+            val vcfIterator : Iterator[VariantContext] = vcfReader.iterator();
+           // val finalIter = chromFilterVcfIterator(vcfIterator,chromSet=chromSet);
+            addIteratorCloseAction[VariantContext](iter = vcfIterator, closeAction = (() => {reportln("finished reading file: "+file + "("+getDateAndTimeString+")" + "("+(idx+1)+"/"+denominator+")","note")}))
         }}
+        val vcIter = chromFilterVcfIterator(flattenIterators(iteriter),chromSet=chromSet);      
         val (vcIter2, newHeader) = this.walkVCF(vcIter = vcIter, vcfHeader = vcfHeader)
         val vcfWriter = internalUtils.VcfTool.getVcfWriter(outfile, header = newHeader);
         vcIter2.foreach(vc => {
@@ -370,6 +379,16 @@ object VcfTool {
       val vcfIterator : Iterator[VariantContext] = vcfReader.iterator(); //chromSet match {
       val (a,b,c) = progressVerbosity;
       
+      val finalIterator = chromFilterVcfIterator(vcfIterator,chromSet=chromSet,vcfCodes=vcfCodes,progressVerbosity=progressVerbosity);
+      return (finalIterator,vcfHeader);
+  }
+  
+  def chromFilterVcfIterator(vcfIterator : Iterator[VariantContext],
+                        chromSet : Option[Set[String]],
+                        vcfCodes : VCFAnnoCodes = VCFAnnoCodes(),
+                        progressVerbosity : (Int,Int,Int) = (10000,50000,100000)) : Iterator[VariantContext] = {
+      val (a,b,c) = progressVerbosity;
+      
       val finalIterator = chromSet match {
         case Some(cs) => {
           if(cs.size == 1){
@@ -407,23 +426,7 @@ object VcfTool {
         }
       }
       
-      //val wrappedVcfIterator = progressVerbosity match {
-      //  //case Some((a,b,c)) => internalUtils.stdUtils.wrapIteratorWithProgressReporter(vcfIterator , internalUtils.stdUtils.IteratorProgressReporter_ThreeLevel("lines",a,b,c) )
-      //  case Some((a,b,c)) => internalUtils.stdUtils.wrapIteratorWithAdvancedProgressReporter[VariantContext](filteredIterator,
-      //                           internalUtils.stdUtils.AdvancedIteratorProgressReporter_ThreeLevelAuto[VariantContext](elementTitle = "lines", lineSec = 60))
-      //                        //internalUtils.stdUtils.AdvancedIteratorProgressReporter_ThreeLevelAccel[VariantContext](elementTitle = "lines", 
-      //                        //                                   accelFactor  = 10,
-      //                        //                                   maxAccel = a,
-      //                        //                                   dotThreshold = 1,
-      //                        //                                   dotSpaceThreshold = 5,
-      //                        //                                  dotNewlineThreshold = 10))
-      //  case None => vcfIterator
-      //}
-      //val finalIterator = chromSet match {
-      //      case Some(chroms) => wrappedVcfIterator.filter(v =>  chroms.contains(v.getContig()));
-      //      case None => wrappedVcfIterator;
-      //}
-      return (finalIterator,vcfHeader);
+      return finalIterator;
   }
 
   

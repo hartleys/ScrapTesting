@@ -44,20 +44,25 @@ object VcfAnnotateTX {
                           );
   
     
+    
+    
+    
+    
   class CmdCalcGenotypeStatTable  extends CommandLineRunUtil{
-     override def priority = 20;
+     override def priority = 40;
      val parser : CommandLineArgParser = 
        new CommandLineArgParser(
           command = "CalcGenotypeStatTable", 
           quickSynopsis = "Generates stat tables for genotype statistics (eg GQ, AD)", 
           synopsis = "", 
-          description = "Warning: does not function on phased genotypes! " + ALPHA_WARNING,
+          description = "This takes a stat table for genotype statistics (such as GQ or AD). Warning: does not function on phased genotypes! " + ALPHA_WARNING,
           argList = 
                     new BinaryOptionArgument[List[String]](
                                          name = "chromList", 
                                          arg = List("--chromList"), 
                                          valueName = "chr1,chr2,...",  
-                                         argDesc =  "List of chromosomes. If supplied, then all analysis will be restricted to these chromosomes. All other chromosomes wil be ignored."
+                                         argDesc =  "List of chromosomes. If supplied, then all analysis will be restricted to "+
+                                                    "these chromosomes. All other chromosomes wil be ignored."
                                         ) ::
                                         /*
                     new BinaryOptionArgument[String](
@@ -88,19 +93,21 @@ object VcfAnnotateTX {
                                         ) ::
                     new UnaryArgument( name = "infileList",
                                          arg = List("--infileList"), // name of value
-                                         argDesc = ""+
+                                         argDesc = "If this option is used, then instead of a single input file the input file(s) will be assumed "+
+                                                   "to be a file containing a list of input files to parse in order. If multiple VCF files are specified, "+
+                                                   "the vcf lines will be concatenated and the header will be taken from the first file."+
                                                    "" // description
                                        ) ::
                     new UnaryArgument( name = "byBaseSwap",
                                          arg = List("--byBaseSwap"), // name of value
-                                         argDesc = ""+
+                                         argDesc = "Placeholder: NOT YET IMPLEMENTED!"+
                                                    "" // description
                                        ) ::
                     new BinaryOptionArgument[String](
                                          name = "subFilterExpressionSets", 
                                          arg = List("--subFilterExpressionSets"), 
                                          valueName = "",  
-                                         argDesc =  "NOT YET IMPLEMENTED!"
+                                         argDesc =  "Placeholder: NOT YET IMPLEMENTED!"
                                         ) ::
                     new FinalArgument[String](
                                          name = "infile",
@@ -110,7 +117,16 @@ object VcfAnnotateTX {
                     new FinalArgument[String](
                                          name = "tagFile",
                                          valueName = "tagFile.txt",
-                                         argDesc = "Can be gzipped or in plaintext." // description
+                                         argDesc = "Can be gzipped or in plaintext. This is a special text file that specifies which genotype tags to examine and "+
+                                                   "what stats to collect. It must be a tab-delimited file with a variable number of rows. "+
+                                                   "The first row must be the line type, which is either \"TAG\" or \"PAIR\". "+
+                                                   "For TAG lines: the second column is the title to be used for the tag. "+
+                                                   "The third column is the tag ID as it appears in the VCF file. "+
+                                                   "The fourth column is the format or function to collect. Options are: "+
+                                                   "Int (the tag is a simple Int), sumInt (the tag is a series of Ints, collect the sum), get0 (the tag is a series of ints, collect the first value), get1 (the tag is a series of ints, collect the second value). "+
+                                                   "The fifth should specify the counting bins to use, as a comma-delimited list of underscore-delimited numbers. The bins are specified as lower-bound-inclusive. "+
+                                                   "PAIR rows should just have 2 additional columns: one specifying one of the tag titles that appears in one of the TAG lines in this file. "+
+                                                   "This will cause the utility to count a crosswise table comparing the two specified stats across the specified windows."
                                         ) ::
                     new FinalArgument[String](
                                          name = "outfileprefix",
@@ -182,7 +198,7 @@ object VcfAnnotateTX {
         ((tv : String) => 0)
       }
       
-      val tagIV = cells.drop(3).map{cell => {cell.split("_").map{string2int(_)}}}.map{s => (s(0),s(1))}
+      val tagIV = cells(3).split(",").map{cell => {cell.split("_").map{string2int(_)}}}.map{s => (s(0),s(1))}
       val arrayLen = tagIV.length + 3;
       val lowIdx = tagIV.length;
       val highIdx = tagIV.length + 1;
@@ -343,7 +359,7 @@ object VcfAnnotateTX {
     
     
   class compareVcfs extends CommandLineRunUtil {
-     override def priority = 20;
+     override def priority = 25;
      val parser : CommandLineArgParser = 
        new CommandLineArgParser(
           command = "compareVcfs", 
@@ -379,7 +395,9 @@ object VcfAnnotateTX {
                                         ) ::
                     new UnaryArgument( name = "infileList",
                                          arg = List("--infileList"), // name of value
-                                         argDesc = "Use this option if you want to provide input file(s) containing a list of input files rather than a single input file"+
+                                         argDesc = "If this option is used, then instead of a single input file the input file(s) will be assumed "+
+                                                   "to be a file containing a list of input files to parse in order. If multiple VCF files are specified, "+
+                                                   "the vcf lines will be concatenated and the header will be taken from the first file."+
                                                    "" // description
                                        ) ::
                     new UnaryArgument( name = "noGzipOutput",
@@ -1350,6 +1368,91 @@ object VcfAnnotateTX {
     
   }
   
+
+  class CmdFixVcfInfoWhitespace extends CommandLineRunUtil {
+     override def priority = 20;
+     val parser : CommandLineArgParser = 
+       new CommandLineArgParser(
+          command = "fixVcfInfoWhitespace", 
+          quickSynopsis = "", 
+          synopsis = "", 
+          description = "" + ALPHA_WARNING,
+          argList = 
+                    new BinaryOptionArgument[List[String]](
+                                         name = "chromList", 
+                                         arg = List("--chromList"), 
+                                         valueName = "chr1,chr2,...",  
+                                         argDesc =  "List of chromosomes. If supplied, then all analysis will be restricted to these chromosomes. All other chromosomes wil be ignored."
+                                        ) ::
+                    new FinalArgument[String](
+                                         name = "infile",
+                                         valueName = "variants.vcf",
+                                         argDesc = "input VCF file. Can be gzipped or in plaintext." // description
+                                        ) ::
+                    new FinalArgument[String](
+                                         name = "outfile",
+                                         valueName = "outfile.vcf.gz",
+                                         argDesc = "The output file. Can be gzipped or in plaintext."// description
+                                        ) ::
+                    internalUtils.commandLineUI.CLUI_UNIVERSAL_ARGS );
+
+     def run(args : Array[String]) {
+       val out = parser.parseArguments(args.toList.tail);
+       if(out){
+         FixVcfInfoWhitespace(
+         ).walkVCFFile(
+             infile = parser.get[String]("infile"),
+             outfile = parser.get[String]("outfile"),
+             chromList = parser.get[Option[List[String]]]("chromList"),
+             numLinesRead = None
+         )
+       }
+     }
+    
+  }
+
+  case class FixVcfInfoWhitespace() extends internalUtils.VcfTool.SVcfWalker {
+
+    def walkVCF(vcIter : Iterator[SVcfVariantLine],vcfHeader : SVcfHeader, verbose : Boolean = true) : (Iterator[SVcfVariantLine],SVcfHeader) = {
+      var errCt = 0;
+      
+      (addIteratorCloseAction( iter = vcIter.map{v => {
+        val vc = v.getOutputLine()
+        if(vc.in_info.exists{ case (tag, value) => {
+            value match {
+              case Some(valString) => {
+                valString.contains(' ')
+              }
+              case None => {
+                false
+              }
+            }
+          }}
+        ){
+          vc.in_info = vc.in_info.map{ case (tag,value) => {
+            value match {
+              case Some(valString) => {
+                (tag,Some(valString.replaceAll(" ","_")))
+              }
+              case None => {
+                (tag,None)
+              }
+            }
+            
+          }}
+          errCt = errCt + 1;
+        }
+        vc;
+      }}, closeAction = (() => {
+        val warningType = if(errCt == 0) "NOTE: " else "WARNING: ";
+        reportln(warningType+"Found "+errCt +" lines with whitespace in the INFO field!","debug")
+      })),vcfHeader)
+      
+    }
+
+    
+  }
+  
   class CmdAddTxBed extends CommandLineRunUtil {
      override def priority = 20;
      val parser : CommandLineArgParser = 
@@ -1458,7 +1561,7 @@ object VcfAnnotateTX {
   
   
   class addTXAnno extends CommandLineRunUtil {
-     override def priority = 20;
+     override def priority = 10;
      val parser : CommandLineArgParser = 
        new CommandLineArgParser(
           command = "addTxInfoToVCF", 
@@ -2051,6 +2154,8 @@ object VcfAnnotateTX {
             vb = vb.attribute(tagString, if(bedFunction(variantIV)) "1" else "0");
           }}
         }
+      } else if(geneVariantsOnly){
+        return None;
       }
       return Some(vb.make());
   }
@@ -3177,7 +3282,7 @@ object VcfAnnotateTX {
   
 
   class CmdSplitMultiAllelics extends CommandLineRunUtil {
-     override def priority = 100;
+     override def priority = 15;
      val parser : CommandLineArgParser = 
        new CommandLineArgParser(
           command = "splitMultiAllelics", 
@@ -3196,6 +3301,13 @@ object VcfAnnotateTX {
                                          argDesc = ""+
                                                    ""
                                        ) ::
+                    new UnaryArgument( name = "infileList",
+                                         arg = List("--infileList"), // name of value
+                                         argDesc = "If this option is used, then instead of a single input file the input file(s) will be assumed "+
+                                                   "to be a file containing a list of input files to parse in order. If multiple VCF files are specified, "+
+                                                   "the vcf lines will be concatenated and the header will be taken from the first file."+
+                                                   "" // description
+                                       ) ::
                     new FinalArgument[String](
                                          name = "invcf",
                                          valueName = "variants.vcf",
@@ -3211,16 +3323,19 @@ object VcfAnnotateTX {
     def run(args : Array[String]) {
      val out = parser.parseArguments(args.toList.tail);
      if(out){ 
-       runSplitMultiAllelics( parser.get[String]("invcf"),
-                              parser.get[String]("outvcf"),
-                              chromList = parser.get[Option[List[String]]]("chromList"),
-                              clinVarVariants = parser.get[Boolean]("clinVarVariants")
-           )
+       SplitMultiAllelics(clinVarVariants = parser.get[Boolean]("clinVarVariants"), 
+                          splitSimple = parser.get[Boolean]("clinVarVariants")
+                        ).walkVCFFiles(
+                              infile = parser.get[String]("invcf"),
+                              outfile = parser.get[String]("outvcf"), 
+                              chromList = parser.get[Option[List[String]]]("chromList"), 
+                              infileList = parser.get[Boolean]("infileList")
+                        )
      }
   }
   }
   
-  def runSplitMultiAllelics(infile : String, outfile : String, chromList : Option[List[String]], clinVarVariants : Boolean, vcfCodes : VCFAnnoCodes = VCFAnnoCodes()){
+  /*def runSplitMultiAllelics(infile : String, outfile : String, chromList : Option[List[String]], clinVarVariants : Boolean, infileList : Boolean, vcfCodes : VCFAnnoCodes = VCFAnnoCodes()){
     val (vcIter,vcfHeader) = internalUtils.VcfTool.getVcfIterator(infile, 
                                        chromList = chromList,
                                        vcfCodes = vcfCodes);
@@ -3233,7 +3348,7 @@ object VcfAnnotateTX {
       vcfWriter.add(vc)
     })
     vcfWriter.close();
-  }
+  }*/
   
   val multiAllelicIndexStream = Iterator.from(0).toStream.map(i => {
     Range(0,i).flatMap(k => Range(k,i).map(z => (k,z)))
@@ -3256,7 +3371,8 @@ object VcfAnnotateTX {
           //new VCFInfoHeaderLine(vcfCodes.isSplitMulti_TAG, 0, VCFHeaderLineType.Flag,    "Indicates that this line was split apart from a multiallelic VCF line."),
           new VCFInfoHeaderLine(vcfCodes.splitIdx_TAG,     1, VCFHeaderLineType.Integer, "Indicates the index of this biallelic line in the set of biallelic lines extracted from the same multiallelic VCF line."),
           new VCFInfoHeaderLine(vcfCodes.numSplit_TAG,     1, VCFHeaderLineType.Integer, "Indicates the number of biallelic lines extracted from the same multiallelic VCF line as this line."),
-          new VCFInfoHeaderLine(vcfCodes.splitAlle_TAG,     VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.String, "The original set of alternative alleles.")
+          new VCFInfoHeaderLine(vcfCodes.splitAlle_TAG,     VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.String, "The original set of alternative alleles."),
+           new VCFInfoHeaderLine(vcfCodes.splitAlleWARN_TAG,     VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.String, "Warnings produced by the multiallelic allele split. These may occur when certain tags have the wrong number of values.")
       ) ++ (if(clinVarVariants){
         List[VCFHeaderLine](
             new VCFInfoHeaderLine("CLNPROBLEM",     1, VCFHeaderLineType.Integer, "Indicates whether the splitting of the Clinvar CLN tags was successful. 1=yes, 0=no.")
@@ -3291,8 +3407,9 @@ object VcfAnnotateTX {
           x.getID()
         }
       })
-
-
+      
+      val tagWarningMap = new scala.collection.mutable.AnyRefMap[String,Int](tag => 0);
+      
       infoCLN.foreach(x => {
         reportln("INFO Line "+x+" is of type CLN","debug");
       })
@@ -3305,6 +3422,8 @@ object VcfAnnotateTX {
       
       val sampNames = vcfHeader.getSampleNamesInOrder();
       return (addIteratorCloseAction(vcIter.flatMap(vc => {
+        var warningSet = Set[String]();
+        
         if(vc.getNAlleles() <= 2 && (! splitSimple)){
           var vb = new htsjdk.variant.variantcontext.VariantContextBuilder(vc);
           vb = vb.attribute(vcfCodes.numSplit_TAG, "1" );
@@ -3329,6 +3448,8 @@ object VcfAnnotateTX {
                 warning("WARNING: ATTR: \""+key+"\"=\""+attr+"\" of type \"A\"\n   VAR:\n      atr.length() = "+atr.length + " numAlle = "+numAlle+
                     (if(internalUtils.optionHolder.OPTION_DEBUGMODE) "\n   "+vc.toStringWithoutGenotypes() else ""),
                     "INFO_LENGTH_WRONG",NUMREPORTBADLEN);
+                warningSet = warningSet + ("INFO_LENGTH_WRONG_A."+key)
+                tagWarningMap(key) += 1; 
                 repToSeq(atr.mkString(","),numAlle - 1);
               } else {
                 atr.toSeq;
@@ -3343,6 +3464,8 @@ object VcfAnnotateTX {
                 warning("WARNING: ATTR: \""+key+"\"=\""+attr+"\" of type \"R\"\n   VAR:\n      atr.length() = "+atr.length + " numAlle = "+numAlle+
                        (if(internalUtils.optionHolder.OPTION_DEBUGMODE) "\n   "+vc.toStringWithoutGenotypes() else ""),
                        "INFO_LENGTH_WRONG",NUMREPORTBADLEN);
+                warningSet = warningSet + ("INFO_LENGTH_WRONG_R."+key)
+                tagWarningMap(key) += 1;
                 repToSeq(atr.mkString(","),numAlle);
               } else {
                 atr.toSeq;
@@ -3485,7 +3608,7 @@ object VcfAnnotateTX {
                 //do nothing
               }
             }
-            
+            vb.attribute(vcfCodes.splitAlleWARN_TAG, warningSet.toVector.sorted.map(_.toString()).padTo(1,".").mkString(","));
             
             /*copyAttrA.foreach{case (key,attr) => {
               val kx = vc.getAttributeAsString(key,"[]").tail.init.split(",")
@@ -3512,6 +3635,10 @@ object VcfAnnotateTX {
         Range(1,badCtCt.keys.max+1).foreach{k => {
           reportln("badAltCt("+k+"): "+ badCtCt(k) + " VCF lines","debug");
         }}}
+        tagWarningMap.toVector.sortBy{ case (tag,ct) => tag }.foreach{ case (tag,ct) => {
+          reportln("WARNING_PROBLEMATIC_TAG\t"+tag+"\t"+ct,"debug");
+        }}
+        
       }),newHeader)
     }
   }
@@ -5241,7 +5368,9 @@ object VcfAnnotateTX {
                                         ) ::
                     new UnaryArgument( name = "infileList",
                                          arg = List("--infileList"), // name of value
-                                         argDesc = ""+
+                                         argDesc = "If this option is used, then instead of a single input file the input file(s) will be assumed "+
+                                                   "to be a file containing a list of input files to parse in order. If multiple VCF files are specified, "+
+                                                   "the vcf lines will be concatenated and the header will be taken from the first file."+
                                                    "" // description
                                        ) ::
                     new FinalArgument[String](

@@ -33,7 +33,7 @@ import internalUtils.commandLineUI._;
 object CalcACMGVar {
   
   class CmdAssessACMG extends CommandLineRunUtil {
-     override def priority = 30;
+     override def priority = 11;
      val parser : CommandLineArgParser = 
        new CommandLineArgParser(
           command = "CmdAssessACMG", 
@@ -71,7 +71,7 @@ object CalcACMGVar {
                                          name = "rmskFile", 
                                          arg = List("--rmskFile"), 
                                          valueName = "rmsk.txt.gz",  
-                                         argDesc =  "rmsk.txt.gz file, from UCSC."
+                                         argDesc =  "rmsk.txt.gz file, from UCSC. The only columns that matter are the 6th through 8th columns, which specify the chromosome, starts, and ends of each repetitive region (counting from 0, upper bound exclusive)"
                                         ) :: 
                     new BinaryOptionArgument[String](
                                          name = "toleranceFile", 
@@ -96,14 +96,18 @@ object CalcACMGVar {
                                          arg = List("--inSilicoKeys"), 
                                          valueName = "dbNSFP_MetaSVM_pred:D:T",
                                          argDesc =  "This must be a comma-delimited list (no spaces). Each element in the list must consist of 3 parts, seperated by colons (\":\"). "+
-                                                    "The first part is the INFO key referring to the stored results of an in silico prediction algorithm. The 2nd is a \"|\"-delimited list "+
-                                                    "of the values that should be interpreted as \"predicted damaging\", and the third is a \"|\"-delimited list of the values that should be interpreted as \"predicted benign\""
+                                                    "The first part is the INFO key referring to the stored results of an in silico prediction algorithm. The 2nd is an operator, which can be either \"eq\", \"ge\", or \"le\". "+
+                                                    "For \"eq\", the third and fourth columns can be \"|\"-delimited lists of values that will be interpreted as \"damaging\" or \"benign\" respectively. "+
+                                                    "For the other two functions, the third and fourth columns are values referring to the thresholds for counting the variant as \"damaging\" or \"benign\" respectively. "+
+                                                    "Higher is assumed to mean more damaging for \"ge\", and lower is more damaging for \"le\". "+
+                                                    "This utility will calculate a \"summary\" statistic for each specified algorithm which lists the variant as either damaging, ambiguous, benign, or unknown. Variants listed as both damaging as benign will be listed as ambiguous, "+
+                                                    "and variants that are listed as both damaging and unknown will be listed as damaging, and similar for benign."
                                         ) :: 
                     new BinaryArgument[String](
                                          name = "inSilicoMergeMethod", 
                                          arg = List("--inSilicoMergeMethod"), 
                                          valueName = "smart",
-                                         argDesc =  "",
+                                         argDesc =  "Currently the only legal value is the default, \"smart\".",
                                          defaultValue = Some("smart")
                                         ) :: 
                     new BinaryOptionArgument[String](
@@ -116,7 +120,7 @@ object CalcACMGVar {
                                          name = "lowMapBed", 
                                          arg = List("--lowMapBed"), 
                                          valueName = "lowMapBed.bed.gz",  
-                                         argDesc =  "This file contains all spans with mappability less than 1."
+                                         argDesc =  "This simple bed file should contain all spans with mappability less than 1."
                                         ) :: 
                     new BinaryArgument[List[String]](name = "ctrlAlleFreqKeys",
                                            arg = List("--ctrlAlleFreqKeys"),  
@@ -146,7 +150,7 @@ object CalcACMGVar {
                                          name = "hgmdVarVcf", 
                                          arg = List("--hgmdVarVcf"), 
                                          valueName = "HGMD.vcf.gz",  
-                                         argDesc =  "File containing HGMD variants."
+                                         argDesc =  "File containing HGMD variants All variants will be assumed to be likely pathogenic."
                                         ) :: 
                     new BinaryOptionArgument[String](
                                          name = "superGroupList", 
@@ -1589,25 +1593,25 @@ object CalcACMGVar {
       canonCrits.addCrit(ps1_canon);
       canonCrits.addCrit(pm5_canon);
       
-      vb = vb.attribute(vcfCodes.assess_pathoExactMatchRS, if(exactRS == "") "." else "rs"+exactRS);
-      vb = vb.attribute(vcfCodes.assess_pathoAminoMatchRS, ps1RS.toVector.sorted.map("rs"+_.toString()).padTo(1,".").mkString(","));
-      vb = vb.attribute(vcfCodes.assess_pathoNearMatchRS,  pm5RS.toVector.sorted.map("rs"+_.toString()).padTo(1,".").mkString(","));
-      vb = vb.attribute(vcfCodes.assess_pathoAminoMatchRS_CANON, ps1RS_canon.toVector.sorted.map("rs"+_.toString()).padTo(1,".").mkString(","));
-      vb = vb.attribute(vcfCodes.assess_pathoNearMatchRS_CANON,  pm5RS_canon.toVector.sorted.map("rs"+_.toString()).padTo(1,".").mkString(","));
+      vb = vb.attribute(vcfCodes.assess_pathoExactMatchRS, if(exactRS == "") "." else exactRS);
+      vb = vb.attribute(vcfCodes.assess_pathoAminoMatchRS, ps1RS.toVector.sorted.map(_.toString()).padTo(1,".").mkString(","));
+      vb = vb.attribute(vcfCodes.assess_pathoNearMatchRS,  pm5RS.toVector.sorted.map(_.toString()).padTo(1,".").mkString(","));
+      vb = vb.attribute(vcfCodes.assess_pathoAminoMatchRS_CANON, ps1RS_canon.toVector.sorted.map(_.toString()).padTo(1,".").mkString(","));
+      vb = vb.attribute(vcfCodes.assess_pathoNearMatchRS_CANON,  pm5RS_canon.toVector.sorted.map(_.toString()).padTo(1,".").mkString(","));
       
       //        assess_exactMatchInfo : String = TOP_LEVEL_VCF_TAG+"ACMG_cvInfo_ExactMatch",
       //  assess_aminoMatchInfo : String = TOP_LEVEL_VCF_TAG+"ACMG_cvInfo_AminoMatch",
       //  assess_nearMatchInfo : String = TOP_LEVEL_VCF_TAG+"ACMG_cvInfo_NearMatch",
       
       if(exactAllRS != ""){
-        vb = vb.attribute(vcfCodes.assess_exactMatchInfo,  "rs"+exactAllRS+"|"+exactAllSig+"|"+exactAllRawSig);
+        vb = vb.attribute(vcfCodes.assess_exactMatchInfo,  exactAllRS+"|"+exactAllSig+"|"+exactAllRawSig);
       } else {
         vb = vb.attribute(vcfCodes.assess_exactMatchInfo,  ".");
       }
-      vb = vb.attribute(vcfCodes.assess_aminoMatchInfo, aminoMatchInfo.toVector.sorted.map{case (a,b,c) => "rs"+a + "|" + b+"|"+c}.padTo(1,".").mkString(","));
-      vb = vb.attribute(vcfCodes.assess_nearMatchInfo,  nearMatchInfo.toVector.sorted.map{case (a,b,c) => "rs"+a + "|" + b+"|"+c}.padTo(1,".").mkString(","));
-      vb = vb.attribute(vcfCodes.assess_aminoMatchInfo_CANON, aminoMatchInfo_canon.toVector.sorted.map{case (a,b,c) => "rs"+a + "|" + b+"|"+c}.padTo(1,".").mkString(","));
-      vb = vb.attribute(vcfCodes.assess_nearMatchInfo_CANON,  nearMatchInfo_canon.toVector.sorted.map{case (a,b,c) => "rs"+a + "|" + b+"|"+c}.padTo(1,".").mkString(","));
+      vb = vb.attribute(vcfCodes.assess_aminoMatchInfo, aminoMatchInfo.toVector.sorted.map{case (a,b,c) => a + "|" + b+"|"+c}.padTo(1,".").mkString(","));
+      vb = vb.attribute(vcfCodes.assess_nearMatchInfo,  nearMatchInfo.toVector.sorted.map{case (a,b,c) => a + "|" + b+"|"+c}.padTo(1,".").mkString(","));
+      vb = vb.attribute(vcfCodes.assess_aminoMatchInfo_CANON, aminoMatchInfo_canon.toVector.sorted.map{case (a,b,c) => a + "|" + b+"|"+c}.padTo(1,".").mkString(","));
+      vb = vb.attribute(vcfCodes.assess_nearMatchInfo_CANON,  nearMatchInfo_canon.toVector.sorted.map{case (a,b,c) => a + "|" + b+"|"+c}.padTo(1,".").mkString(","));
       
       //******************************* Insilico:
       //inSilicoMin
@@ -1965,7 +1969,7 @@ object CalcACMGVar {
       reportln("Starting ClinVar VCF read...","progress");
       for(v <- vcIter){
         try {
-          val rsnum = v.getAttributeAsString("RS","unknownRSNUM") //v.getID();
+          val rsnum = "rs"+v.getAttributeAsString("RS","UNK") //v.getID();
           val refAlle = v.getReference();
           val altAlleles = Range(0,v.getNAlleles()-1).map((a) => v.getAlternateAllele(a));
           //val vTypesList = v.getAttributeAsList(vcfCodes.vType_TAG).toVector.map(_.toString.split(vcfCodes.delims(1)).toVector);
@@ -2054,7 +2058,7 @@ object CalcACMGVar {
         
         for(v <- vcIter){
           try {
-            val rsnum = v.getAttributeAsString("ACC_NUM","unknownRSNUM") //v.getID();
+            val rsnum = v.getAttributeAsString("ACC_NUM","UNK") //v.getID();
             val refAlle = v.getReference();
             val altAlleles = Range(0,v.getNAlleles()-1).map((a) => v.getAlternateAllele(a));
             //val vTypesList = v.getAttributeAsList(vcfCodes.vType_TAG).toVector.map(_.toString.split(vcfCodes.delims(1)).toVector);
@@ -2066,7 +2070,7 @@ object CalcACMGVar {
             
             val vMutGList = v.getAttributeAsList(vcfCodes.vMutG_TAG).toVector.map(_.toString()).filter(_ != ".");
             
-            val hgmdClass = v.getAttributeAsList("").toVector.map(_.toString()).padTo(1,"NA");
+            val hgmdClass = "DM";
             
             val vMutInfoList = if(txList.length > 0) {
               v.getAttributeAsList(vcfCodes.vMutINFO_TAG).toVector.zipWithIndex.map{ case (attrObj, altIdx) => {
@@ -2075,13 +2079,13 @@ object CalcACMGVar {
                 attrSplit.map{ case (x) => {
                   //val clnSig = vClnSig(altIdx).split("\\|");
                   //0 - Uncertain significance, 1 - not provided, 2 - Benign, 3 - Likely benign, 4 - Likely pathogenic, 5 - Pathogenic, 6 - drug response, 7 - histocompatibility, 255 - other                        
-                  internalUtils.TXUtil.getPvarInfoFromString(x, ID = "HGMDID_"+rsnum,CLNSIG=5,RAWCLNSIG="HGMD_"+hgmdClass(altIdx));
+                  internalUtils.TXUtil.getPvarInfoFromString(x, ID = ""+rsnum,CLNSIG=5,RAWCLNSIG="HGMD_"+hgmdClass);
                 }}
               }}
             } else {
               Vector();
             }
-            if(txList.length > 0) { 
+            if(txList.length > 0) {
               for((alle,altIdx) <- altAlleles.zipWithIndex.filter{case (a,i) => { a.getBaseString() != "*" }}){
                  val vMutC = vMutCList(altIdx);
                  val vInfo = vMutInfoList(altIdx);
@@ -2095,9 +2099,9 @@ object CalcACMGVar {
                  }
                  if(gset.containsKey(chrom + ":" + vMutGList(altIdx))){
                    val oldVal = gset(chrom + ":" + vMutGList(altIdx));
-                   gset(chrom + ":" + vMutGList(altIdx)) = (oldVal._1+"|HGMDID_"+rsnum,5,oldVal._3+"|HGMD_"+hgmdClass(altIdx));
+                   gset(chrom + ":" + vMutGList(altIdx)) = (oldVal._1+"/"+rsnum,5,oldVal._3+"/HGMD_"+hgmdClass);
                  } else {
-                   gset(chrom + ":" + vMutGList(altIdx)) = ("HGMDID_"+rsnum,5,"HGMD_"+hgmdClass(altIdx));
+                   gset(chrom + ":" + vMutGList(altIdx)) = (""+rsnum,5,"HGMD_"+hgmdClass);
                  }
               }
             }
