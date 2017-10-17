@@ -399,6 +399,12 @@ object VcfAnnotateTX {
                                          valueName = "filterExpr",  
                                          argDesc =  ""
                                         ) ::
+                    new BinaryOptionArgument[String](
+                                         name = "bedFile", 
+                                         arg = List("--bedFile"), 
+                                         valueName = "bedFile.bed.gz",  
+                                         argDesc =  ""
+                                        ) ::
                     new FinalArgument[String](
                                          name = "infile1",
                                          valueName = "variants1.vcf",
@@ -430,7 +436,8 @@ object VcfAnnotateTX {
                           gzipOutput = ! parser.get[Boolean]("noGzipOutput"),
                           sampleDecoder = parser.get[Option[String]]("sampleDecoder"),
                           filterExpression1 = parser.get[Option[String]]("filterExpression1"),
-                          filterExpression2 = parser.get[Option[String]]("filterExpression2")
+                          filterExpression2 = parser.get[Option[String]]("filterExpression2"),
+                          bedFile = parser.get[Option[String]]("bedFile")
          ).run()
        }
      }
@@ -676,6 +683,17 @@ object VcfAnnotateTX {
     def isOther(vc : SVcfVariantLine, idx : Int, i : Int) : Boolean = {
       vc.genotypes.genotypeValues(idx)(i).length != 3 || vc.genotypes.genotypeValues(idx)(i).charAt(0) == '2' || vc.genotypes.genotypeValues(idx)(i).charAt(2) == '2'
     }
+    def isClean(vc : SVcfVariantLine, idx : Int, i : Int) : Boolean = {
+      if(vc.genotypes.genotypeValues(idx)(i).length != 3){
+        false
+      } else {
+        val (a,b) = (vc.genotypes.genotypeValues(idx)(i)(0), vc.genotypes.genotypeValues(idx)(i)(2))
+        (a == '0' || a == '1') && (b == '0' || b == '1')
+      }
+    }
+    def isCleanMismatch(vc : SVcfVariantLine,idx1 : Int, idx2: Int, i : Int) : Boolean = {
+      isClean(vc,idx1,i) && isClean(vc,idx2,i) && vc.genotypes.genotypeValues(idx1)(i) != vc.genotypes.genotypeValues(idx2)(i)
+    }
     
     val matchCountFunctionList_BASE : Vector[(String, Array[Int], (SVcfVariantLine,SVcfVariantLine) => Boolean, (SVcfVariantLine,Int,Int,Int) => Boolean)] = Vector[(String, Array[Int], (SVcfVariantLine,SVcfVariantLine) => Boolean, (SVcfVariantLine,Int,Int,Int) => Boolean)](
         ("noCall",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine, vc2 : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
@@ -695,6 +713,9 @@ object VcfAnnotateTX {
         }),
         ("mismatch",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine, vc2 : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
               isMisMatch(vc,idx1,idx2,i)
+        }),
+        ("mismatch.clean",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine, vc2 : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
+              isCleanMismatch(vc,idx1,idx2,i)
         }),
         ("mismatch.Ref.Alt",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine, vc2 : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
               isMisMatch(vc,idx1,idx2,i) && isRef(vc,idx1,i) && isAnyAlt(vc,idx2,i);
