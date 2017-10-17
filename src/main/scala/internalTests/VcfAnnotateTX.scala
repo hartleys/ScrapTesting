@@ -48,7 +48,7 @@ object VcfAnnotateTX {
      override def priority = 20;
      val parser : CommandLineArgParser = 
        new CommandLineArgParser(
-          command = "compareVcfs", 
+          command = "CalcGenotypeStatTable", 
           quickSynopsis = "", 
           synopsis = "", 
           description = "" + ALPHA_WARNING,
@@ -91,6 +91,17 @@ object VcfAnnotateTX {
                                          argDesc = ""+
                                                    "" // description
                                        ) ::
+                    new UnaryArgument( name = "byBaseSwap",
+                                         arg = List("--byBaseSwap"), // name of value
+                                         argDesc = ""+
+                                                   "" // description
+                                       ) ::
+                    new BinaryOptionArgument[String](
+                                         name = "subFilterExpressionSets", 
+                                         arg = List("--subFilterExpressionSets"), 
+                                         valueName = "",  
+                                         argDesc =  "NOT YET IMPLEMENTED!"
+                                        ) ::
                     new FinalArgument[String](
                                          name = "infile",
                                          valueName = "variants.vcf",
@@ -118,7 +129,7 @@ object VcfAnnotateTX {
                           chromList = parser.get[Option[List[String]]]("chromList"),
                           genoTag = parser.get[String]("GenoTag"),
                           infileList = parser.get[Boolean]("infileList"),
-                          filterExpressionSet = parser.get[Option[String]]("filterExpressionSet")
+                          filterExpressionSet = parser.get[Option[String]]("subFilterExpressionSets")
          ).run()
        }
      }
@@ -131,22 +142,47 @@ object VcfAnnotateTX {
                               chromList : Option[List[String]],
                               genoTag : String,
                               infileList : Boolean,
-                              filterExpressionSet : Option[String]) {
+                              filterExpressionSet : Option[String],
+                              byBaseSwap : Boolean = false) {
     
-    val tagSet = getLinesSmartUnzip(tagFile).toVector.map{ line =>{
-      val cells = line.split("\t");
-      val tagID = cells(0);
-      val tagFmt = cells(1);
+    val NUM_GT_IDXES = 6;
+    val GT_IDXES_LABELS = Vector("Miss","HomRef","Het","HomAlt","OtherAlt","Other");
+    
+    def getGTIdx(gt : String) : Int = {
+          if(gt.contains('.')){
+            0
+          } else if(gt == "0/0"){
+            1
+          } else if(gt == "0/1"){
+            2
+          } else if(gt == "1/1"){
+            3
+          } else if(gt.split("/").contains("1")){
+            4
+          } else {
+            5
+          }
+    }
+    
+    val tagSet = getLinesSmartUnzip(tagFile).filter(line => line.startsWith("TAG")).toVector.map{ line =>{
+      val cells = line.split("\t").tail;
+      val tagTitle = cells(0);
+      val tagID = cells(1);
+      val tagFmt = cells(2);
       val tagReadFunc : (String => Int) = if(tagFmt == "Int"){
-        ((tv : String) => string2int(tv))
+        ((tv : String) => if(tv == "."){0} else {string2int(tv)})
       } else if(tagFmt == "sumInt"){
-        ((tv : String) => tv.split(",").map{string2int(_)}.sum)
+        ((tv : String) => if(tv == "."){0} else {tv.split(",").map{string2int(_)}.sum})
+      } else if(tagFmt == "get0"){
+        ((tv : String) => if(tv == "."){0} else {string2int(tv.split(",")(0))} )
+      } else if(tagFmt == "get1"){
+        ((tv : String) => if(tv == "."){0} else {string2int(tv.split(",")(1))} )
       } else {
         error("Fatal error: unsupported TAG format!");
         ((tv : String) => 0)
       }
       
-      val tagIV = cells.tail.tail.map{cell => {cell.split("_").map{string2int(_)}}}.map{s => (s(0),s(1))}
+      val tagIV = cells.drop(3).map{cell => {cell.split("_").map{string2int(_)}}}.map{s => (s(0),s(1))}
       val arrayLen = tagIV.length + 3;
       val lowIdx = tagIV.length;
       val highIdx = tagIV.length + 1;
@@ -170,45 +206,34 @@ object VcfAnnotateTX {
         }
       })
       
-      (tagID,tagFmt,arrayLabels,getIndices);
+      (tagTitle,tagID,tagFmt,arrayLabels,getIndices);
     }}
     
-    val NUM_GT_IDXES = 6;
-    val GT_IDXES_LABELS = Vector("Miss","HomRef","Het","HomAlt","OtherAlt","OTHER");
-    
-    def getGTIdx(gt : String) : Int = {
-          if(gt.contains('.')){
-            0
-          } else if(gt == "0/0"){
-            1
-          } else if(gt == "0/1"){
-            2
-          } else if(gt == "1/1"){
-            3
-          } else if(gt.split("/").contains("1")){
-            4
-          } else {
-            5
-          }
-    }
-    
-    val tagPairs = getAllPossiblePairs(tagSet.length);
+    val tagPairs = getLinesSmartUnzip(tagFile).filter(line => line.startsWith("PAIR")).toVector.map{ line =>{
+      val cells = line.split("\t");
+      if(cells.length != 3) error("Malformed tagfile! PAIR lines must have 3 columns!")
+      val tagTitles = cells.tail;
+      val tagIdxes = tagTitles.map{tt => tagSet.indexWhere{ case (tagTitle,tagID,tagFmt,arrayLabels,getIndicesFunc) => { 
+        tagTitle == tt
+      }}}
+      (tagIdxes(0), tagIdxes(1))
+    }}
     
     def getAllIndices(vc : SVcfVariantLine) : (Array[Int],Array[Array[Int]]) = {
       val gtTagIdx = vc.genotypes.fmt.indexOf(genoTag);
       val gtIndices = vc.genotypes.genotypeValues(gtTagIdx).map{gt => {getGTIdx(gt)}}.toArray
-      val tagIndices = tagSet.map{ case (tagID,tagFmt,arrayLabels,getIndicesFunc) => {
+      val tagIndices = tagSet.map{ case (tagTitle,tagID,tagFmt,arrayLabels,getIndicesFunc) => {
         getIndicesFunc(vc.genotypes);
       }}.toArray
       (gtIndices, tagIndices);
     }
     
-    class VariantCountSetByAllTags(ct : Int) {
-      val tagCts = tagSet.map{ case (tagID,tagFmt,arrayLabels,getIndicesFunc) => {
+    class VariantCountSetByAllTags(ct : Int, prefix : String = "") {
+      val tagCts = tagSet.map{ case (tagTitle,tagID,tagFmt,arrayLabels,getIndicesFunc) => {
         Array.fill[Int](arrayLabels.length,ct,NUM_GT_IDXES)(0);
       }}.toArray;
       val tagPairCts = tagPairs.map{ case (idx1,idx2) => {
-        Array.fill[Int](tagSet(idx1)._3.length,tagSet(idx2)._3.length,ct,NUM_GT_IDXES)(0);
+        Array.fill[Int](tagSet(idx1)._4.length,tagSet(idx2)._4.length,ct,NUM_GT_IDXES)(0);
       }}.toArray;
       
       def addVC(gtIndices : Array[Int], tagIndices : Array[Array[Int]]){
@@ -220,16 +245,18 @@ object VcfAnnotateTX {
         tagPairs.indices.map{ case i => {
           val (i1,i2) = tagPairs(i);
           tagIndices(i1).indices.foreach{ j => {
+            //warning("Attempting to access tagPairCts("+i+")(tagIndices("+i1+")("+j+"))(tagIndices("+i2+")("+j+"))("+j+")(gtIndices("+j+"))","debugWarn",-1);
+            //warning("                     tagPairCts("+i+")("+tagIndices(i1)(j)+")("+tagIndices(i2)(j)+")("+j+")("+gtIndices(j)+")","debugWarn",-1);
             tagPairCts(i)(tagIndices(i1)(j))(tagIndices(i2)(j))(j)(gtIndices(j)) += 1;
           }}
         }}
       }
       
       def getOutputLines() : Iterator[String] = {
-        tagSet.zipWithIndex.iterator.flatMap{case ((tagID,tagFmt,arrayLabels,getIndicesFunc),i) => {
+        tagSet.zipWithIndex.iterator.flatMap{case ((tagTitle,tagID,tagFmt,arrayLabels,getIndicesFunc),i) => {
           arrayLabels.indices.flatMap{ j => {
             (0 until NUM_GT_IDXES).map{ gtidx => {
-              tagID+":"+arrayLabels(j)+":"+GT_IDXES_LABELS(gtidx)+"\t"+
+              prefix+tagTitle+":"+arrayLabels(j)+":"+GT_IDXES_LABELS(gtidx)+"\t"+
               (0 until ct).map{sampIdx => {
                 tagCts(i)(j)(sampIdx)(gtidx);
               }}.mkString("\t");
@@ -237,12 +264,12 @@ object VcfAnnotateTX {
           }}
         }} ++ 
         tagPairs.zipWithIndex.iterator.flatMap{ case ((i1,i2),i) => {
-          val (tagID1,tagFmt1,arrayLabels1,getIndicesFunc1) = tagSet(i1);
-          val (tagID2,tagFmt2,arrayLabels2,getIndicesFunc2) = tagSet(i2);
+          val (tagTitle1,tagID1,tagFmt1,arrayLabels1,getIndicesFunc1) = tagSet(i1);
+          val (tagTitle2,tagID2,tagFmt2,arrayLabels2,getIndicesFunc2) = tagSet(i2);
           arrayLabels1.indices.flatMap{ j1 => {
             arrayLabels2.indices.flatMap{ j2 => {
               (0 until NUM_GT_IDXES).map{ gtidx => {
-                "TAGPAIR:"+tagID1+":"+tagID2+":"+arrayLabels1(j1)+":"+arrayLabels2(j2)+":"+GT_IDXES_LABELS(gtidx)+"\t"+
+                prefix+"TAGPAIR:"+tagTitle1+":"+tagTitle2+":"+arrayLabels1(j1)+":"+arrayLabels2(j2)+":"+GT_IDXES_LABELS(gtidx)+"\t"+
                 (0 until ct).map{sampIdx => {
                   tagPairCts(i)(j1)(j2)(sampIdx)(gtidx);
                 }}.mkString("\t");
@@ -278,17 +305,37 @@ object VcfAnnotateTX {
       val vcIter = vcIterRaw.buffered;
       
       val cts = new VariantCountSetByAllTags(vcfHeader.sampleCt);
-      
+      val snvCts = new VariantCountSetByAllTags(vcfHeader.sampleCt,"SNV:");
+      //val indelCts = new VariantCountSetByAllTags(vcfHeader.sampleCt,"INDEL:");
+      val biSnvCts = new VariantCountSetByAllTags(vcfHeader.sampleCt,"BIALLESNV:");
+      val counters = Seq(cts,snvCts,biSnvCts);
+        
       vcIter.foreach{vc => {
-        val (gtIndices, tagIndices) = getAllIndices(vc);
-        cts.addVC(gtIndices,tagIndices);
+        if(vc.filter == "."){
+          val (gtIndices, tagIndices) = getAllIndices(vc);
+          cts.addVC(gtIndices,tagIndices);
+          if(vc.ref.length == 1 && vc.alt.head.length == 1){
+            snvCts.addVC(gtIndices,tagIndices);
+            if(vc.alt.length == 1){
+              biSnvCts.addVC(gtIndices,tagIndices);
+            }
+          } //else {
+            //indelCts.addVC(gtIndices,tagIndices);
+          //}
+        }
       }}
       
       val writer = openWriterSmart(outfile);
       writer.write("FIELD\t"+vcfHeader.getSampleList.mkString("\t")+"\n");
-      cts.getOutputLines().foreach{ line => {
-        writer.write(line+"\n");
+      counters.foreach{ c => {
+        c.getOutputLines().foreach{ line => {
+          writer.write(line+"\n");
+        }}
       }}
+      
+      //cts.getOutputLines().foreach{ line => {
+      //  writer.write(line+"\n");
+      //}}
       writer.close();
     }
   }
@@ -403,8 +450,37 @@ object VcfAnnotateTX {
                               gzipOutput : Boolean,
                               sampleDecoder : Option[String],
                               filterExpression1: Option[String],
-                              filterExpression2 : Option[String]){
+                              filterExpression2 : Option[String],
+                              bedFile : Option[String] = None){
     
+    val bedFilter : Option[(SVcfVariantLine => Boolean)] = bedFile match {
+      case Some(f) => {
+            val chromFunc = chromList match {
+              case Some(cl) => {
+                val chromSet = cl.toSet;
+                (chr : String) => chromSet.contains(chr);
+              }
+              case None => {
+                (chr : String) => true
+              }
+            }
+            val arr : internalUtils.genomicAnnoUtils.GenomicArrayOfSets[String] = internalUtils.genomicAnnoUtils.GenomicArrayOfSets[String](false);
+            reportln("   Beginning bed file read: "+f+" ("+getDateAndTimeString+")","debug");
+            val lines = getLinesSmartUnzip(f);
+            lines.map{line => line.split("\t")}.withFilter{cells => { chromFunc(cells(0)) }}.foreach(cells => {
+              val (chrom,start,end) = (cells(0),string2int(cells(1)),string2int(cells(2)))
+              arr.addSpan(internalUtils.commonSeqUtils.GenomicInterval(chrom, '.', start,end), "CE");
+            })
+            arr.finalizeStepVectors;
+            Some(((vc : SVcfVariantLine) => {
+              val iv = internalUtils.commonSeqUtils.GenomicInterval(vc.chrom,'.', start = vc.pos - 1, end = math.max(vc.pos,vc.pos + vc.ref.length - 1));
+              arr.findWhollyContainedSteps(iv).exists{ case (iv, currSet) => { ! currSet.isEmpty }}
+            }))
+      }
+      case None => {
+        None
+      }
+    }
     
     val filterparser : SVcfFilterLogicParser = internalUtils.VcfTool.SVcfFilterLogicParser();
     val filter1 : SFilterLogic[SVcfVariantLine] = filterExpression1 match {
@@ -601,90 +677,109 @@ object VcfAnnotateTX {
       vc.genotypes.genotypeValues(idx)(i).length != 3 || vc.genotypes.genotypeValues(idx)(i).charAt(0) == '2' || vc.genotypes.genotypeValues(idx)(i).charAt(2) == '2'
     }
     
-    val matchCountFunctionList_BASE : Vector[(String, Array[Int], SVcfVariantLine => Boolean, (SVcfVariantLine,Int,Int,Int) => Boolean)] = Vector[(String, Array[Int], SVcfVariantLine => Boolean, (SVcfVariantLine,Int,Int,Int) => Boolean)](
-        ("noCall",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
+    val matchCountFunctionList_BASE : Vector[(String, Array[Int], (SVcfVariantLine,SVcfVariantLine) => Boolean, (SVcfVariantLine,Int,Int,Int) => Boolean)] = Vector[(String, Array[Int], (SVcfVariantLine,SVcfVariantLine) => Boolean, (SVcfVariantLine,Int,Int,Int) => Boolean)](
+        ("noCall",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine, vc2 : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
               ! isCalled(vc,idx1,i) && ! isCalled(vc,idx2,i)
         }),
-        ("calledA",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
+        ("calledA",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine, vc2 : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
               isCalled(vc,idx1,i) && ! isCalled(vc,idx2,i)
         }),
-        ("calledB",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
+        ("calledB",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine, vc2 : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
               ! isCalled(vc,idx1,i) && isCalled(vc,idx2,i)
         }),
-        ("called",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
+        ("called",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine, vc2 : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
               isCalled(vc,idx1,i) && isCalled(vc,idx2,i)
         }),
-        ("match",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
+        ("match",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine, vc2 : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
               isMatch(vc,idx1,idx2,i)
         }),
-        ("mismatch",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
+        ("mismatch",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine, vc2 : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
               isMisMatch(vc,idx1,idx2,i)
         }),
-        ("mismatch.Ref.Alt",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
+        ("mismatch.Ref.Alt",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine, vc2 : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
               isMisMatch(vc,idx1,idx2,i) && isRef(vc,idx1,i) && isAnyAlt(vc,idx2,i);
         }),
-        ("mismatch.Alt.Ref",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
+        ("mismatch.Alt.Ref",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine, vc2 : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
               isMisMatch(vc,idx1,idx2,i) && isRef(vc,idx2,i) && isAnyAlt(vc,idx1,i);
         }),
-        ("mismatch.NRef.NRef",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
+        ("mismatch.NRef.NRef",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine, vc2 : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
               isMisMatch(vc,idx1,idx2,i) && (! isRef(vc,idx1,i)) && (! isRef(vc,idx2,i));
         }),
-        ("mismatch.Ha.Het",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
+        ("mismatch.Ha.Het",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine, vc2 : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
               isMisMatch(vc,idx1,idx2,i) && isHomAlt(vc,idx1,i) && isHet(vc,idx2,i);
         }),
-        ("mismatch.Het.Ha",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
+        ("mismatch.Het.Ha",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine, vc2 : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
               isMisMatch(vc,idx1,idx2,i) && isHomAlt(vc,idx2,i) && isHet(vc,idx1,i);
         }),
-        ("mismatch.Ref.Het",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
+        ("mismatch.Ref.Het",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine, vc2 : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
               isMisMatch(vc,idx1,idx2,i) && isRef(vc,idx1,i) && isHet(vc,idx2,i);
         }),
-        ("mismatch.Het.Ref",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
+        ("mismatch.Het.Ref",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine, vc2 : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
               isMisMatch(vc,idx1,idx2,i) && isRef(vc,idx2,i) && isHet(vc,idx1,i);
         }),
-        ("mismatch.Ref.Ha",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
+        ("mismatch.Ref.Ha",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine, vc2 : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
               isMisMatch(vc,idx1,idx2,i) && isRef(vc,idx1,i) && isHomAlt(vc,idx2,i);
         }),
-        ("mismatch.Ha.Ref",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
+        ("mismatch.Ha.Ref",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine, vc2 : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
               isMisMatch(vc,idx1,idx2,i) && isRef(vc,idx2,i) && isHomAlt(vc,idx1,i);
         }),
-        ("mismatch.Other",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
+        ("mismatch.Other",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine, vc2 : SVcfVariantLine) => true,(vc : SVcfVariantLine, idx1: Int, idx2 :Int, i : Int) => {
               isMisMatch(vc,idx1,idx2,i) && (isOther(vc,idx1,i) || isOther(vc,idx2,i))
         })
     );
     val matchCountFunctionList_BYTYPE = matchCountFunctionList_BASE.map{ case (id,arr,varFcn,fcn) => {
-      (id + "_SNV",Array.fill[Int](matchIdx.length)(0),(vc : SVcfVariantLine) => isSNV(vc),fcn)
+      (id + "_SNV",Array.fill[Int](matchIdx.length)(0),(vc : SVcfVariantLine, vc2 : SVcfVariantLine) => isSNV(vc),fcn)
     }} ++ matchCountFunctionList_BASE.map{ case (id,arr,varFcn,fcn) => {
-      (id + "_INDEL",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine) => ! isSNV(vc),fcn)
+      (id + "_INDEL",Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine, vc2 : SVcfVariantLine) => ! isSNV(vc),fcn)
     }}
     
     val matchCountFunctionList_BYSWAP = matchCountFunctionList_BASE.flatMap{ case (id,arr,varFcn,fcn) => {
       SNVVARIANT_BASESWAP_LIST.map{ case ((r1,a1),(r2,a2)) => {
-        (id+"_SNV_SWAP."+r1+a1,Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine) => {
+        (id+"_SNV_SWAP."+r1+a1,Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine, vc2 : SVcfVariantLine) => {
           isSNV(vc) && ((vc.ref == r1 && vc.alt.head == a1) || (vc.ref == r2 && vc.alt.head == a2))
         },fcn)
       }}
     }}
     
-    val matchCountFunctionList_BASE2 : Vector[(String, Array[Int], SVcfVariantLine => Boolean, (SVcfVariantLine,Int,Int,Int) => Boolean)] = matchCountFunctionList_BASE ++ matchCountFunctionList_BYTYPE ++ matchCountFunctionList_BYSWAP;
+    val matchCountFunctionList_BASE2 : Vector[(String, Array[Int], (SVcfVariantLine, SVcfVariantLine) => Boolean, (SVcfVariantLine,Int,Int,Int) => Boolean)] = matchCountFunctionList_BASE ++ matchCountFunctionList_BYTYPE ++ matchCountFunctionList_BYSWAP;
     val matchCountFunctionList_BASE2_CFILTSET = matchCountFunctionList_BASE2.map{ case (id,arr, varFcn,fcn) => {
-      ("CPASSAB_"+id,Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine) => {
-        varFcn(vc) && vc.filter == "."
+      ("CPASSAB_"+id,Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine, vc2 : SVcfVariantLine) => {
+        varFcn(vc,vc2) && vc.filter == "."
       },fcn)
     }} ++ matchCountFunctionList_BASE2.map{ case (id,arr, varFcn,fcn) => {
-      ("CPASSA_"+id,Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine) => {
-        varFcn(vc) && vc.filter != "." && vc.filter.split(",")(0) == ".";
+      ("CPASSA_"+id,Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine, vc2 : SVcfVariantLine) => {
+        varFcn(vc,vc2) && vc.filter != "." && vc.filter.split(",")(0) == ".";
       },fcn)
     }} ++ matchCountFunctionList_BASE2.map{ case (id,arr, varFcn,fcn) => {
-      ("CPASSB_"+id,Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine) => {
-        varFcn(vc) && vc.filter != "." && vc.filter.split(",")(1) == ".";
+      ("CPASSB_"+id,Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine, vc2 : SVcfVariantLine) => {
+        varFcn(vc,vc2) && vc.filter != "." && vc.filter.split(",")(1) == ".";
       },fcn)
     }} ++ matchCountFunctionList_BASE2.map{ case (id,arr, varFcn,fcn) => {
-      ("CPASSN_"+id,Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine) => {
-        varFcn(vc) && vc.filter != "." && vc.filter.split(",")(1) != "." && vc.filter.split(",")(0) != "."
+      ("CPASSN_"+id,Array.fill[Int](matchIdx.length)(0), (vc : SVcfVariantLine, vc2 : SVcfVariantLine) => {
+        varFcn(vc,vc2) && vc.filter != "." && vc.filter.split(",")(1) != "." && vc.filter.split(",")(0) != "."
       },fcn)
     }}
     
-    val matchCountFunctionList_FINAL : Vector[(String, Array[Int], SVcfVariantLine => Boolean, (SVcfVariantLine,Int,Int,Int) => Boolean)] = matchCountFunctionList_BASE2 ++ matchCountFunctionList_BASE2_CFILTSET
+    val matchCountFunctionList_3 : Vector[(String, Array[Int], (SVcfVariantLine,SVcfVariantLine) => Boolean, (SVcfVariantLine,Int,Int,Int) => Boolean)] = matchCountFunctionList_BASE2 ++ matchCountFunctionList_BASE2_CFILTSET
+    
+    val matchCountFunctionList_4 : Vector[(String, Array[Int], (SVcfVariantLine,SVcfVariantLine) => Boolean, (SVcfVariantLine,Int,Int,Int) => Boolean)] = matchCountFunctionList_3 ++ matchCountFunctionList_3.map{
+      case (id,arr, varFcn,fcn) => {
+        ("BIALLE_"+id,Array.fill[Int](matchIdx.length)(0),(vc : SVcfVariantLine, vc2 : SVcfVariantLine) => {varFcn(vc,vc2) && vc.alt.length == 1 && vc2.alt.length == 1},fcn)
+      }
+    }
+    
+    val matchCountFunctionList_FINAL : Vector[(String, Array[Int], (SVcfVariantLine, SVcfVariantLine) => Boolean, (SVcfVariantLine,Int,Int,Int) => Boolean)] =  matchCountFunctionList_4 ++ (
+      bedFilter match{
+        case Some(bfilt) => {matchCountFunctionList_4.map{
+          case (id,arr, varFcn,fcn) => {
+            ("ONBED_"+id,Array.fill[Int](matchIdx.length)(0),(vc : SVcfVariantLine, vc2 : SVcfVariantLine) => {varFcn(vc,vc2) && bfilt(vc)},fcn)
+          }  
+        }}
+        case None => {
+          Vector();
+        }
+      }
+    )
     
     ////////////////////////////////////////////////////////////////////
     
@@ -735,12 +830,29 @@ object VcfAnnotateTX {
       },fcn)
     }}
     
-    val mmCountFunctionList_A  : Vector[(String, Array[Int], SVcfVariantLine => Boolean, (SVcfVariantLine,Int,Int) => Boolean)] = mmCountFunctionList_BASE2 ++ mmCountFunctionList_CPASS
+    val mmCountFunctionList_3 : Vector[(String, Array[Int], SVcfVariantLine => Boolean, (SVcfVariantLine,Int,Int) => Boolean)] = mmCountFunctionList_BASE2 ++ mmCountFunctionList_CPASS
+    
+    val mmCountFunctionList_4 : Vector[(String, Array[Int], SVcfVariantLine => Boolean, (SVcfVariantLine,Int,Int) => Boolean)] = mmCountFunctionList_3 ++ mmCountFunctionList_3.map{
+      case (id,arr, varFcn,fcn) => {
+        ("BIALLE_"+id,Array.fill[Int](matchIdx.length)(0),(vc : SVcfVariantLine) => {varFcn(vc) && vc.alt.length == 1},fcn)
+      }
+    }
+    
+    val mmCountFunctionList_A  : Vector[(String, Array[Int], SVcfVariantLine => Boolean, (SVcfVariantLine,Int,Int) => Boolean)] = mmCountFunctionList_4 ++ (bedFilter match {
+        case Some(bfilt) => {mmCountFunctionList_4.map{
+          case (id,arr, varFcn,fcn) => {
+            ("ONBED_"+id,Array.fill[Int](matchIdx.length)(0),(vc : SVcfVariantLine) => {varFcn(vc) && bfilt(vc)},fcn)
+          }
+        }}
+      case None => {
+        Vector();
+      }
+    })
     
     val mmCountFunctionList_B = mmCountFunctionList_A.map{ case (id,arr,varFcn,fcn) => {
       (id,Array.fill[Int](matchIdx.length)(0),varFcn,fcn)
     }}
-
+    
     ////////////////////////////////////////////////////////////////////
 
     def iteratePos() : Seq[SVcfVariantLine] = {
@@ -785,13 +897,14 @@ object VcfAnnotateTX {
       )
       out1.write(vco.getVcfString+"\n");
       val idx = vco.format.indexOf(genoTag1)
-      mmCountFunctionList_A.foreach{ case (id,arr,varFcn,fcn) => {
-        if(varFcn(vco)){
-          matchIdxIdx.foreach{ i => {
-            if(fcn(vc,idx,i)) arr(i) += 1;
-          }}
-        }
-      }}
+        mmCountFunctionList_A.foreach{ case (id,arr,varFcn,fcn) => {
+          if(varFcn(vco)){
+            matchIdxIdx.foreach{ i => {
+              if(fcn(vc,idx,i)) arr(i) += 1;
+            }}
+          }
+        }}
+
       vco;
     }
     def writeVC2(vc : SVcfVariantLine) : SVcfVariantLine = {
@@ -807,13 +920,13 @@ object VcfAnnotateTX {
       )
       out2.write(vco.getVcfString+"\n");
       val idx = vco.format.indexOf(fGenoTag2);
-      mmCountFunctionList_B.foreach{ case (id,arr,varFcn,fcn) => {
-        if(varFcn(vco)){
-          matchIdxIdx.foreach{ i => {
-            if(fcn(vc,idx,i)) arr(i) += 1;
-          }}
-        }
-      }}
+        mmCountFunctionList_B.foreach{ case (id,arr,varFcn,fcn) => {
+          if(varFcn(vco)){
+            matchIdxIdx.foreach{ i => {
+              if(fcn(vc,idx,i)) arr(i) += 1;
+            }}
+          }
+        }}
       vco;
     }
 
@@ -843,16 +956,17 @@ object VcfAnnotateTX {
        in_genotypes = gt
       )
       outM.write(vco.getVcfString+"\n");
-      val (idx1,idx2) = (vco.format.indexOf(genoTag1),vco.format.indexOf(fGenoTag2));
-      if(idx1 != -1 && idx2 != -1){
-        matchCountFunctionList_FINAL.foreach{ case (id,arr,varFcn,fcn) => {
-          if(varFcn(vco)){
-            matchIdxIdx.foreach{ i => {
-              if(fcn(vco,idx1,idx2,i)) arr(i) += 1;
-            }}
-          }
-        }}
-      }
+      
+        val (idx1,idx2) = (vco.format.indexOf(genoTag1),vco.format.indexOf(fGenoTag2));
+        if(idx1 != -1 && idx2 != -1){
+          matchCountFunctionList_FINAL.foreach{ case (id,arr,varFcn,fcn) => {
+            if(varFcn(vco,vc2)){
+              matchIdxIdx.foreach{ i => {
+                if(fcn(vco,idx1,idx2,i)) arr(i) += 1;
+              }}
+            }
+          }}
+        }
 
       vco;
     }
@@ -2457,6 +2571,11 @@ object VcfAnnotateTX {
                                          argDesc = ""+
                                                    "" // description
                                        ) :: 
+                    new UnaryArgument( name = "noMultiAllelics",
+                                         arg = List("--noMultiAllelics"), // name of value
+                                         argDesc = ""+
+                                                   "" // description
+                                       ) :: 
                     new FinalArgument[String](
                                          name = "invcf",
                                          valueName = "variants.vcf",
@@ -2480,11 +2599,13 @@ object VcfAnnotateTX {
                             addFreq   = ! parser.get[Boolean]("noFrq"),
                             addMiss   = ! parser.get[Boolean]("noMiss"),
                             addAlle   = ! parser.get[Boolean]("noAlle"),
-                            addHetHom = ! parser.get[Boolean]("noGeno")).walkVCFFile(
-                            parser.get[String]("invcf"), 
-                            parser.get[String]("outvcf"),
-                            chromList = parser.get[Option[List[String]]]("chromList")
-                            );
+                            addHetHom = ! parser.get[Boolean]("noGeno"),
+                            noMultiAllelics = parser.get[Boolean]("noMultiAllelics")
+                          ).walkVCFFile(
+                              parser.get[String]("invcf"), 
+                              parser.get[String]("outvcf"),
+                              chromList = parser.get[Option[List[String]]]("chromList")
+                          );
        
        /*runAddGroupInfoAnno( parser.get[String]("invcf"),
                             parser.get[String]("outvcf"),
@@ -2530,6 +2651,7 @@ object VcfAnnotateTX {
              addCounts : Boolean = true, addFreq : Boolean = true, addMiss : Boolean = true, 
              addAlle : Boolean= true, addHetHom : Boolean = true, 
              sepRef : Boolean = true, countMissing : Boolean = true,
+             noMultiAllelics : Boolean = false,
              vcfCodes : VCFAnnoCodes = VCFAnnoCodes()) extends internalUtils.VcfTool.VCFWalker {
     
     def walkVCF(vcIter : Iterator[VariantContext], vcfHeader : VCFHeader, verbose : Boolean = true) : (Iterator[VariantContext], VCFHeader) = {
@@ -2713,21 +2835,29 @@ object VcfAnnotateTX {
         
         for((g,i) <- groups.zipWithIndex){
           if(addCounts && addAlle) vb = vb.attribute(vcfCodes.grpAC_TAG + g, groupAlleCts.map(_(i)).toList.asJava);
-          if(addFreq && addAlle) vb = vb.attribute(vcfCodes.grpAF_TAG + g, groupAlleAF.tail.map(_(i)).toList.asJava);
           if(addCounts && addHetHom) vb = vb.attribute(vcfCodes.grpHomCt_TAG  + g, groupHomCts.map(_(i)).toList.asJava);
           if(addCounts && addHetHom) vb = vb.attribute(vcfCodes.grpHetCt_TAG  + g, groupHetCts.map(_(i)).toList.asJava);
-          if(addFreq && addHetHom) vb = vb.attribute(vcfCodes.grpHomFrq_TAG + g, groupHomFrq.tail.map(_(i)).toList.asJava);
-          if(addFreq && addHetHom) vb = vb.attribute(vcfCodes.grpHetFrq_TAG + g, groupHetFrq.tail.map(_(i)).toList.asJava);
           if(addCounts   && addMiss) vb = vb.attribute(vcfCodes.grpMisCt_TAG + g,  groupMisCts(i));
           if(addFreq     && addMiss) vb = vb.attribute(vcfCodes.grpMisFrq_TAG + g, groupMisFrq(i));
           
-          if(addCounts && addAlle)   vb = vb.attribute(vcfCodes.grpAltAC_TAG + g,    groupAlleCts.tail.map(_(i)).toList.asJava);
-          if(addCounts && addHetHom) vb = vb.attribute(vcfCodes.grpAltHetCt_TAG + g, groupHetCts.tail.map(_(i)).toList.asJava);
-          if(addCounts && addHetHom) vb = vb.attribute(vcfCodes.grpAltHomCt_TAG + g, groupHomCts.tail.map(_(i)).toList.asJava);
+          if(noMultiAllelics){
+            if(addFreq && addAlle) vb = vb.attribute(vcfCodes.grpAF_TAG + g, groupAlleAF.tail.head(i).toString());
+            if(addFreq && addHetHom) vb = vb.attribute(vcfCodes.grpHomFrq_TAG + g, groupHomFrq.tail.head(i).toString());
+            if(addFreq && addHetHom) vb = vb.attribute(vcfCodes.grpHetFrq_TAG + g, groupHetFrq.tail.head(i).toString());
+            if(addCounts && addAlle)   vb = vb.attribute(vcfCodes.grpAltAC_TAG + g,    groupAlleCts.tail.head(i).toString());
+            if(addCounts && addHetHom) vb = vb.attribute(vcfCodes.grpAltHetCt_TAG + g, groupHetCts.tail.head(i).toString());
+            if(addCounts && addHetHom) vb = vb.attribute(vcfCodes.grpAltHomCt_TAG + g, groupHomCts.tail.head(i).toString());
+          } else {
+            if(addFreq && addAlle) vb = vb.attribute(vcfCodes.grpAF_TAG + g, groupAlleAF.tail.map(_(i)).toList.asJava);
+            if(addFreq && addHetHom) vb = vb.attribute(vcfCodes.grpHomFrq_TAG + g, groupHomFrq.tail.map(_(i)).toList.asJava);
+            if(addFreq && addHetHom) vb = vb.attribute(vcfCodes.grpHetFrq_TAG + g, groupHetFrq.tail.map(_(i)).toList.asJava);
+            if(addCounts && addAlle)   vb = vb.attribute(vcfCodes.grpAltAC_TAG + g,    groupAlleCts.tail.map(_(i)).toList.asJava);
+            if(addCounts && addHetHom) vb = vb.attribute(vcfCodes.grpAltHetCt_TAG + g, groupHetCts.tail.map(_(i)).toList.asJava);
+            if(addCounts && addHetHom) vb = vb.attribute(vcfCodes.grpAltHomCt_TAG + g, groupHomCts.tail.map(_(i)).toList.asJava);
+          }
           if(addCounts && addHetHom) vb = vb.attribute(vcfCodes.grpRefHomCt_TAG + g, groupHomCts.head(i).toString());
           if(addCounts && addHetHom) vb = vb.attribute(vcfCodes.grpRefHetCt_TAG + g, groupHetCts.head(i).toString());
           if(addCounts && addAlle) vb = vb.attribute(vcfCodes.grpRefAC_TAG + g, groupAlleCts.head(i).toString());
-          
           /*
            (if(addCounts && addAlle)   List(new VCFInfoHeaderLine(vcfCodes.grpAltAC_TAG + g, VCFHeaderLineCount.A, VCFHeaderLineType.Integer, "For the "+groupToSampleMap(g).size+" samples in group "+g+", the number of alleles called for the alt allele(s)")) else List[VCFHeaderLine]()) ++
         (if(addCounts && addHetHom)   List(new VCFInfoHeaderLine(vcfCodes.grpAltHetCt_TAG + g, VCFHeaderLineCount.A, VCFHeaderLineType.Integer, "For the "+groupToSampleMap(g).size+" samples in group "+g+", the number of genotypes called as heterozygous for the alt allele(s)")) else List[VCFHeaderLine]()) ++
