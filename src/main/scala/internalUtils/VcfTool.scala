@@ -734,13 +734,14 @@ object VcfTool {
     }
     
     def readVcf(lines : Iterator[String], withProgress : Boolean = true) : (SVcfHeader,Iterator[SVcfInputVariantLine]) = {
-      val (allRawHeaderLines,rawVariantLines) = lines.span(line => line.startsWith("#"));
-      val header = readVcfHeader(allRawHeaderLines.toVector);
+      val bufLines = lines.buffered;
+      val allRawHeaderLines = extractWhile(bufLines)(line => line.startsWith("#"));
+      val header = readVcfHeader(allRawHeaderLines);
       
       val variantLines = if(withProgress){
                          internalUtils.stdUtils.wrapIteratorWithAdvancedProgressReporter[SVcfInputVariantLine](
                            //rawVariantLines.map(line => SVcfInputVariantLine(line,header)),
-                           rawVariantLines.map(line => SVcfInputVariantLine(line)), 
+                           bufLines.map(line => SVcfInputVariantLine(line)), 
                            internalUtils.stdUtils.AdvancedIteratorProgressReporter_ThreeLevelAuto[SVcfInputVariantLine](
                                 elementTitle = "lines", lineSec = 60,
                                 reportFunction  = ((vc : SVcfInputVariantLine, i : Int) => " " + vc.chrom +" "+ internalUtils.stdUtils.MemoryUtil.memInfo )
@@ -748,7 +749,7 @@ object VcfTool {
                          )
       } else {
         //rawVariantLines.map(line => SVcfInputVariantLine(line,header))
-        rawVariantLines.map(line => SVcfInputVariantLine(line))
+        bufLines.map(line => SVcfInputVariantLine(line))
       }
       
       (header,variantLines);

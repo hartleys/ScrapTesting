@@ -49,9 +49,9 @@ object VcfAnnotateTX {
      val parser : CommandLineArgParser = 
        new CommandLineArgParser(
           command = "CalcGenotypeStatTable", 
-          quickSynopsis = "", 
+          quickSynopsis = "Generates stat tables for genotype statistics (eg GQ, AD)", 
           synopsis = "", 
-          description = "" + ALPHA_WARNING,
+          description = "Warning: does not function on phased genotypes! " + ALPHA_WARNING,
           argList = 
                     new BinaryOptionArgument[List[String]](
                                          name = "chromList", 
@@ -83,7 +83,7 @@ object VcfAnnotateTX {
                                          name = "GenoTag", 
                                          arg = List("--GenoTag"), 
                                          valueName = "GT",  
-                                         argDesc =  "",
+                                         argDesc =  "The tag used to indicate genotype.",
                                          defaultValue = Some("GT")
                                         ) ::
                     new UnaryArgument( name = "infileList",
@@ -157,7 +157,7 @@ object VcfAnnotateTX {
             2
           } else if(gt == "1/1"){
             3
-          } else if(gt.split("/").contains("1")){
+          } else if(gt.split("[/|]").contains("1")){
             4
           } else {
             5
@@ -347,9 +347,9 @@ object VcfAnnotateTX {
      val parser : CommandLineArgParser = 
        new CommandLineArgParser(
           command = "compareVcfs", 
-          quickSynopsis = "", 
+          quickSynopsis = "Compares two variant call builds", 
           synopsis = "", 
-          description = "" + ALPHA_WARNING,
+          description = "Compares two different VCFs containing different builds with overlapping sample sets." + ALPHA_WARNING,
           argList = 
                     new BinaryOptionArgument[List[String]](
                                          name = "chromList", 
@@ -367,19 +367,19 @@ object VcfAnnotateTX {
                                          name = "GenoTag1", 
                                          arg = List("--GenoTag1"), 
                                          valueName = "GT",  
-                                         argDesc =  "",
+                                         argDesc =  "The genotype tag used for the first file.",
                                          defaultValue = Some("GT")
                                         ) ::
                     new BinaryArgument[String](
                                          name = "GenoTag2", 
                                          arg = List("--GenoTag2"), 
                                          valueName = "GT",  
-                                         argDesc =  "",
+                                         argDesc =  "The genotype tag used for the second file.",
                                          defaultValue = Some("GT")
                                         ) ::
                     new UnaryArgument( name = "infileList",
                                          arg = List("--infileList"), // name of value
-                                         argDesc = ""+
+                                         argDesc = "Use this option if you want to provide input file(s) containing a list of input files rather than a single input file"+
                                                    "" // description
                                        ) ::
                     new UnaryArgument( name = "noGzipOutput",
