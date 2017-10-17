@@ -92,7 +92,8 @@ object SamTool {
                          stopAfterNReads : Option[Int],
                          testRunLineCt : Int,
                          testRun : Boolean,
-                         maxReadLength : Option[Int]) : (Iterator[(SAMRecord,SAMRecord)],SAMFileHeader,SamFileAttributes) = {
+                         maxReadLength : Option[Int],
+                         strict : Boolean = true) : (Iterator[(SAMRecord,SAMRecord)],SAMFileHeader,SamFileAttributes) = {
     val readerFactory = SamReaderFactory.makeDefault();
     
     val reader = if(inbam == "-"){
@@ -219,10 +220,10 @@ object SamTool {
       } else {
         if(unsorted){
           if(sortPairsByFirstPosition){
-             if(testRun) samRecordPairIterator_resorted(recordIter, true, testRunLineCt,isSingleEnd = isSingleEnd) else samRecordPairIterator_resorted(recordIter,isSingleEnd = isSingleEnd)
+             if(testRun) samRecordPairIterator_resorted(recordIter, true, testRunLineCt,isSingleEnd = isSingleEnd,strict=strict) else samRecordPairIterator_resorted(recordIter,isSingleEnd = isSingleEnd,strict=strict)
           } else {
              //if(testRun) samRecordPairIterator_unsorted(recordIter, true, testRunLineCt) else samRecordPairIterator_unsorted(recordIter)
-             if(testRun) samRecordPairIterator_resorted(recordIter, true, testRunLineCt,isSingleEnd = isSingleEnd) else samRecordPairIterator_resorted(recordIter,isSingleEnd = isSingleEnd)
+             if(testRun) samRecordPairIterator_resorted(recordIter, true, testRunLineCt,isSingleEnd = isSingleEnd,strict=strict) else samRecordPairIterator_resorted(recordIter,isSingleEnd = isSingleEnd,strict=strict)
           }
         // Faster noMultiMapped running is DEPRECIATED!
         //} else if(noMultiMapped){
@@ -466,24 +467,24 @@ object SamTool {
     }
   }
   
-  def samRecordPairIterator_resorted(iter : Iterator[SAMRecord], verbose : Boolean = true, testCutoff : Int = -1, ignoreSecondary : Boolean = true, isSingleEnd : Boolean) : Iterator[(SAMRecord,SAMRecord)] = {
+  def samRecordPairIterator_resorted(iter : Iterator[SAMRecord], verbose : Boolean = true, testCutoff : Int = -1, ignoreSecondary : Boolean = true, isSingleEnd : Boolean, strict : Boolean = true) : Iterator[(SAMRecord,SAMRecord)] = {
 
     if(ignoreSecondary){
        presetProgressReporters.wrapIterator_readPairs(getSRPairIterResorted(iter.filter((read : SAMRecord) => {
            (! read.getNotPrimaryAlignmentFlag()) && (! commonSeqUtils.getMateUnmappedFlag(read)) && (! read.getReadUnmappedFlag())
-         })), verbose=verbose, cutoff=testCutoff,isSingleEnd=isSingleEnd);
+         }),strict = strict), verbose=verbose, cutoff=testCutoff,isSingleEnd=isSingleEnd);
     } else {
       error("FATAL ERROR: Using non-primary read mappings is not currently implemented!");
       return null;
     }
   }
   
-  def samRecordPairIterator_unsorted(iter : Iterator[SAMRecord], verbose : Boolean = true, testCutoff : Int = -1, ignoreSecondary : Boolean = true, isSingleEnd : Boolean) : Iterator[(SAMRecord,SAMRecord)] = {
+  def samRecordPairIterator_unsorted(iter : Iterator[SAMRecord], verbose : Boolean = true, testCutoff : Int = -1, ignoreSecondary : Boolean = true, isSingleEnd : Boolean, strict : Boolean =true) : Iterator[(SAMRecord,SAMRecord)] = {
 
     if(ignoreSecondary){
        presetProgressReporters.wrapIterator_readPairs(getSRPairIterUnsorted(iter.filter((read : SAMRecord) => {
            (! read.getNotPrimaryAlignmentFlag()) && (! commonSeqUtils.getMateUnmappedFlag(read)) && (! read.getReadUnmappedFlag())
-         })), verbose=verbose, cutoff=testCutoff,isSingleEnd=isSingleEnd);
+         }),strict=strict), verbose=verbose, cutoff=testCutoff,isSingleEnd=isSingleEnd);
     } else {
       error("FATAL ERROR: Using non-primary read mappings is not currently implemented!");
       return null;
@@ -542,7 +543,7 @@ object SamTool {
     def bufferLimit : Int;
   }
   
-  private def getSRPairIterUnsorted(iter : Iterator[SAMRecord]) : Iterator[(SAMRecord,SAMRecord)] = {
+  private def getSRPairIterUnsorted(iter : Iterator[SAMRecord], strict : Boolean = true) : Iterator[(SAMRecord,SAMRecord)] = {
     val initialPairContainerWarningSize = 100000;
     val warningSizeMultiplier = 2;
     
@@ -589,7 +590,7 @@ object SamTool {
   }
 
 
-  private def getSRPairIterResorted(iter : Iterator[SAMRecord]) : Iterator[(SAMRecord,SAMRecord)] = {
+  private def getSRPairIterResorted(iter : Iterator[SAMRecord], strict : Boolean = true) : Iterator[(SAMRecord,SAMRecord)] = {
     reportln("Starting getSRPairIterResorted...","debug");
     
     val initialPairContainerWarningSize = 100000;
@@ -630,24 +631,43 @@ object SamTool {
             curr = iter.next;            
           }
           
-          if(! pairContainer.contains(curr.getReadName()) ){
-            internalUtils.Reporter.error("ERROR ERROR ERROR: Reached end of bam file, there are "+(pairContainer.size+1)+" orphaned reads, which are marked as having a mapped pair, but no corresponding pair is found in the bam file. \n(Example Orphaned Read Name: "+curr.getReadName()+")");
+          if((! pairContainer.contains(curr.getReadName())) ){
+            if(strict){
+              internalUtils.Reporter.error("ERROR ERROR ERROR  (636): Reached end of bam file, there are "+(pairContainer.size+1)+" orphaned reads, "+
+                                           "which are marked as having a mapped pair, but no "+
+                                           "corresponding pair is found in the bam file. \n"+
+                                           "(Example Orphaned Read Name: "+curr.getReadName()+")\n"+
+                                           "(Read line: "+curr.getSAMString()+")"
+                                           );
+            } else {
+              internalUtils.Reporter.warning("ERROR ERROR ERROR  (636): Reached end of bam file, there are "+(pairContainer.size+1)+" orphaned reads, "+
+                                           "which are marked as having a mapped pair, but no "+
+                                           "corresponding pair is found in the bam file. \n"+
+                                           "(Example Orphaned Read Name: "+curr.getReadName()+")\n"+
+                                           "(Read line: "+curr.getSAMString()+")","UNPAIRED_READ",-1
+                                           );
+              }
           }
           val rB = pairContainer.remove(curr.getReadName()).get;
           
           if(curr.getFirstOfPairFlag()) buffer.put(curr.getReadName(),(curr,rB))
           else buffer.put(curr.getReadName(),(rB,curr))
         }
-        
+        var readHistory = Vector[String]();
         def hasNext : Boolean = iter.hasNext || buffer.size > 0;
         def next : (SAMRecord,SAMRecord) = {
           if(readOrder.isEmpty){
             addNextPairToBuffer;
           }
+          readHistory = readHistory :+ readOrder.head;
+          if(readHistory.length > 100){
+            readHistory = readHistory.tail;
+          }
           val nextName = readOrder.head;
           readOrder = readOrder.tail;
           if(buffer.containsKey(nextName)) return buffer.remove(nextName).get;
           
+          var searchCt = 0;
           while(iter.hasNext && (! buffer.containsKey(nextName))){
             addNextPairToBuffer;
             if(bufferWarningSize < buffer.size){
@@ -660,13 +680,22 @@ object SamTool {
                            "    This might also indicate that your dataset contains an unusually large number of\n"+
                            "    chimeric read-pairs. Or it could occur simply due to the presence of genomic\n"+
                            "    loci with extremly high coverage or complex splicing. It may also indicate a SAM/BAM file that \n"+
-                           "    does not adhere to the standard SAM specification.)", "note");
+                           "    does not adhere to the standard SAM specification.)\n"+
+                           "  Currently searching for read: " + nextName + " for "+searchCt + " iterations.", "note");
                 }
                 bufferWarningSize = bufferWarningSize * warningSizeMultiplier;
             }
+            searchCt += 1;
           }
           if(!buffer.containsKey(nextName)){
-            internalUtils.Reporter.error("ERROR ERROR ERROR: Reached end of bam file, there are "+(pairContainer.size+1)+" orphaned reads, which are marked as having a mapped pair, but no corresponding pair is found in the bam file. \n(Example Orphaned Read Name: "+nextName+")");
+            //internalUtils.Reporter.error("ERROR ERROR ERROR (679): Reached end of bam file, there are "+(pairContainer.size+1)+" orphaned reads, which are marked as having a mapped pair, but no corresponding pair is found in the bam file. \n(Example Orphaned Read lines: "+nextName+")");
+              internalUtils.Reporter.error("ERROR ERROR ERROR  (679): Reached end of bam file, there are "+(pairContainer.size+1)+" orphaned reads, "+
+                                           "which are marked as having a mapped pair, but no "+
+                                           "corresponding pair is found in the bam file. \n"+
+                                           "(Example Orphaned Read Name: "+nextName+")\n"+
+                                           "Recent reads:\n"+
+                                           "    "+readHistory.mkString("\n    ")
+                                           );
           }
           
           return buffer.remove(nextName).get
