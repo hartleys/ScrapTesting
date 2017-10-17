@@ -933,6 +933,14 @@ object VcfTool {
                                 genotypes.getGenotypeStrings.mkString("\t");
     //def header : SVcfHeader;
     //def getSampleList : Seq[String];
+    def getVcfStringNoGenotypes : String = chrom + "\t"+pos+"\t"+id+"\t"+ref+"\t"+alt.mkString(",")+"\t"+
+                                qual+"\t"+filter+"\t"+info.keySet.toSeq.sorted.map{ case t => {
+                                  val v = info(t);
+                                  v match {
+                                    case Some(sv) => t + "="+sv
+                                    case None => t
+                                  }
+                                }}.mkString(";");
 
     def getOutputLine() : SVcfOutputVariantLine = {
       SVcfOutputVariantLine(
@@ -1165,7 +1173,7 @@ object VcfTool {
   
   abstract class SVcfWalker {
     def walkVCF(vcIter : Iterator[SVcfVariantLine], vcfHeader : SVcfHeader, verbose : Boolean = true) : (Iterator[SVcfVariantLine],SVcfHeader)
-    def walkVCFFile(infile :String, outfile : String, chromList : Option[List[String]], numLinesRead : Option[Int]){
+    def walkVCFFile(infile :String, outfile : String, chromList : Option[List[String]], numLinesRead : Option[Int], dropGenotypes : Boolean = false){
       val (vcIter2, vcfHeader) = getSVcfIterator(infile,chromList,numLinesRead);
       
       val (newIter,newHeader) = walkVCF(vcIter2,vcfHeader,verbose=true);
@@ -1174,9 +1182,15 @@ object VcfTool {
       newHeader.getVcfLines.foreach{line => {
         writer.write(line+"\n");
       }}
-      newIter.foreach{ line => {
-        writer.write(line.getVcfString+"\n");
-      }}
+      if(dropGenotypes){
+        newIter.foreach{ line => {
+          writer.write(line.getVcfStringNoGenotypes+"\n");
+        }}
+      } else {
+        newIter.foreach{ line => {
+          writer.write(line.getVcfString+"\n");
+        }}
+      }
       writer.close();
     }
     

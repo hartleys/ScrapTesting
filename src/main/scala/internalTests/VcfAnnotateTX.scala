@@ -45,8 +45,106 @@ object VcfAnnotateTX {
   
     
     
+
+  class CmdExtractSingletons extends CommandLineRunUtil {
+     override def priority = 20;
+     val parser : CommandLineArgParser = 
+       new CommandLineArgParser(
+          command = "extractSingletons", 
+          quickSynopsis = "", 
+          synopsis = "", 
+          description = "" + ALPHA_WARNING,
+          argList = 
+                    new BinaryOptionArgument[List[String]](
+                                         name = "chromList", 
+                                         arg = List("--chromList"), 
+                                         valueName = "chr1,chr2,...",  
+                                         argDesc =  "List of chromosomes. If supplied, then all analysis will be restricted to these chromosomes. All other chromosomes wil be ignored."
+                                        ) ::
+                    new BinaryArgument[String](
+                                         name = "GenoTag", 
+                                         arg = List("--GenoTag"), 
+                                         valueName = "GT",  
+                                         argDesc =  "The genotype tag used for the first file.",
+                                         defaultValue = Some("GT")
+                                        ) ::
+                    new BinaryArgument[String](
+                                         name = "outputTag", 
+                                         arg = List("--outputTag"), 
+                                         valueName = "SWH_SINGLETON_ID",  
+                                         argDesc =  "",
+                                         defaultValue = Some("SWH_SINGLETON_ID")
+                                        ) ::
+                    new UnaryArgument( name = "dropGenotypes",
+                                         arg = List("--dropGenotypes"), // name of value
+                                         argDesc = ""
+                                       ) ::
+                    new UnaryArgument( name = "keepOnlySingletons",
+                                         arg = List("--keepOnlySingletons"), // name of value
+                                         argDesc = ""+
+                                                   "" // description
+                                       ) ::
+                    new FinalArgument[String](
+                                         name = "infile",
+                                         valueName = "variants.vcf",
+                                         argDesc = "input VCF file. Can be gzipped or in plaintext." // description
+                                        ) ::
+                    new FinalArgument[String](
+                                         name = "outfile",
+                                         valueName = "outfile.vcf.gz",
+                                         argDesc = "The output file. Can be gzipped or in plaintext."// description
+                                        ) ::
+                    internalUtils.commandLineUI.CLUI_UNIVERSAL_ARGS );
+
+     def run(args : Array[String]) {
+       val out = parser.parseArguments(args.toList.tail);
+       if(out){
+         ExtractSingletons(
+             gttag = parser.get[String]("GenoTag"),
+             dropNonSingletons = parser.get[Boolean]("keepOnlySingletons"),
+             infoTag = parser.get[String]("outputTag")
+         ).walkVCFFile(
+             infile = parser.get[String]("infile"),
+             outfile = parser.get[String]("outfile"),
+             chromList = parser.get[Option[List[String]]]("chromList"),
+             numLinesRead = None,
+             dropGenotypes = parser.get[Boolean]("dropGenotypes")
+         )
+       }
+     }
     
+  }
+
+  case class ExtractSingletons(gttag : String = "GT", infoTag : String = "SWH_SINGLETON_ID", dropNonSingletons : Boolean = true, dropGenotypes : Boolean = true) extends internalUtils.VcfTool.SVcfWalker {
+
+    def walkVCF(vcIter : Iterator[SVcfVariantLine],vcfHeader : SVcfHeader, verbose : Boolean = true) : (Iterator[SVcfVariantLine],SVcfHeader) = {
+      var errCt = 0;
+      
+      val outHeader = vcfHeader;
+      outHeader.addInfoLine(new SVcfCompoundHeaderLine("INFO" ,infoTag, "1", "String", "If the variant is a singleton, then this will be the ID of the sample that has the variant."))
+      val samps = outHeader.getSampleList
+      
+      (addIteratorCloseAction( iter = vcIter.flatMap{v => {
+        val vc = v.getOutputLine()
+        val gtidx = vc.genotypes.fmt.indexOf(gttag);
+        val gt = vc.genotypes.genotypeValues(gtidx);
+        val numAlt = gt.zipWithIndex.filter{ case (g,i) => { g.split("[/\\|]").exists(_ == "1") }};
+        if(numAlt.length == 1){
+          vc.addInfo(infoTag, samps(numAlt.head._2))
+          Some(vc);
+        } else if(dropNonSingletons){
+          None;
+        } else {
+          Some(vc)
+        }
+      }}, closeAction = (() => {
+        //do nothing
+      })),vcfHeader)
+      
+    }
+
     
+  }
     
   class CmdCalcGenotypeStatTable  extends CommandLineRunUtil{
      override def priority = 40;
@@ -680,37 +778,40 @@ object VcfAnnotateTX {
     }
     
     def isCalled(vc : SVcfVariantLine, idx : Int, i : Int) : Boolean = {
-      ! vc.genotypes.genotypeValues(idx)(i).contains('.')
+      (idx != -1) && ! vc.genotypes.genotypeValues(idx)(i).contains('.')
     }
     def isCalled(vc : SVcfVariantLine, idx1 : Int, idx2 : Int, i : Int) : Boolean = {
       isCalled(vc,idx1,i) && isCalled(vc,idx2,i);
     }
     def isMatch(vc : SVcfVariantLine,idx1 : Int, idx2: Int, i : Int) : Boolean = {
-      vc.genotypes.genotypeValues(idx1)(i) == vc.genotypes.genotypeValues(idx2)(i) && isCalled(vc,idx1,i)
+      isCalled(vc,idx1,i) && vc.genotypes.genotypeValues(idx1)(i) == vc.genotypes.genotypeValues(idx2)(i)
     }
     def isMisMatch(vc : SVcfVariantLine,idx1 : Int, idx2: Int, i : Int) : Boolean = {
-      vc.genotypes.genotypeValues(idx1)(i) != vc.genotypes.genotypeValues(idx2)(i) && isCalled(vc,idx1,i) && isCalled(vc,idx2,i)
+      isCalled(vc,idx1,i) && isCalled(vc,idx2,i) && vc.genotypes.genotypeValues(idx1)(i) != vc.genotypes.genotypeValues(idx2)(i)
     }
     def isSNV(vc : SVcfVariantLine) : Boolean = {
       vc.ref.length == vc.alt.head.length && vc.ref.length == 1
     }
     def isRef(vc : SVcfVariantLine, idx : Int, i : Int) : Boolean = {
-       vc.genotypes.genotypeValues(idx)(i) == "0/0";
+       isCalled(vc,idx,i) && vc.genotypes.genotypeValues(idx)(i) == "0/0";
     }
     def isHomAlt(vc : SVcfVariantLine, idx : Int, i : Int) : Boolean = {
-      vc.genotypes.genotypeValues(idx)(i) == "1/1";
+       isCalled(vc,idx,i) && vc.genotypes.genotypeValues(idx)(i) == "1/1";
     }
     def isHet(vc : SVcfVariantLine, idx : Int, i : Int) : Boolean = {
-      vc.genotypes.genotypeValues(idx)(i) == "0/1";
+      isCalled(vc,idx,i) && vc.genotypes.genotypeValues(idx)(i) == "0/1";
     }
     def isAnyAlt(vc : SVcfVariantLine, idx : Int, i : Int) : Boolean = {
       //isHet(vc,idx,i) || isHomAlt(vc,idx,i);
-      vc.genotypes.genotypeValues(idx)(i)(0) == '1' || (vc.genotypes.genotypeValues(idx)(i).length == 3 && vc.genotypes.genotypeValues(idx)(i)(2) == '1')
+      isCalled(vc,idx,i) && (vc.genotypes.genotypeValues(idx)(i)(0) == '1' || (vc.genotypes.genotypeValues(idx)(i).length == 3 && vc.genotypes.genotypeValues(idx)(i)(2) == '1'))
     }
     def isOther(vc : SVcfVariantLine, idx : Int, i : Int) : Boolean = {
-      vc.genotypes.genotypeValues(idx)(i).length != 3 || vc.genotypes.genotypeValues(idx)(i).charAt(0) == '2' || vc.genotypes.genotypeValues(idx)(i).charAt(2) == '2'
+      isCalled(vc,idx,i) && (vc.genotypes.genotypeValues(idx)(i).length != 3 || vc.genotypes.genotypeValues(idx)(i).charAt(0) == '2' || vc.genotypes.genotypeValues(idx)(i).charAt(2) == '2')
     }
     def isClean(vc : SVcfVariantLine, idx : Int, i : Int) : Boolean = {
+      if(! isCalled(vc,idx,i)){
+        false;
+      }
       if(vc.genotypes.genotypeValues(idx)(i).length != 3){
         false
       } else {

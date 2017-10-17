@@ -300,28 +300,40 @@ object makeBedWiggle {
                 var currPos = 0;
                 var windowStart = -1;
                 var windowSpans : Vector[(Int,Int)] = Vector();
+                var prevIV : Option[GenomicInterval] = None;
                 ivlist_cd.map{ iv => (iv, codingStepCountArrays(iv)) }.foreach{ case (iv,(txset,countArray)) => {
                   if(windowStart == -1){
                     windowStart = iv.start;
                   }
                   windowSpans = windowSpans :+ (iv.start,iv.start)
                   val ivEndPos = currPos + (iv.end - iv.start);
-                  while( (ivEndPos - 1) / spannedWindowSize > currWindow){
+                  while( (ivEndPos) / spannedWindowSize > currWindow){
                     val windowEndPos = (spannedWindowSize * (currWindow+1)) - currPos + iv.start;
                     windowSpans = windowSpans.init :+ (windowSpans.last._1,windowEndPos);
-                    ivwriter.write(iv.chromName+"\t"+windowStart+"\t"+windowEndPos+"\t"+txset.filter(tx => ! bedTagList.contains(tx)).toVector.sorted.mkString(",")+
-                        ".\t.\t"+windowStart+"\t"+windowEndPos+"\t.\t"+
+                    if(windowStart > windowEndPos){
+                      warning("??? Mal-Ordered interval?\n"+
+                             "     ["+iv.chromName+","+windowStart+","+windowEndPos+"]\n"+
+                             "     iv: ["+iv.chromName+","+iv.start+","+iv.end+"]"+
+                             "     windowStart="+windowStart+", currPos="+currPos+", currWindow = "+currWindow+", windowEndPos="+windowEndPos+
+                             "     prevIV="+(if(prevIV.isEmpty) "NA" else prevIV.get.chromName +","+ prevIV.get.start+","+ prevIV.get.end),"MisOrdered_IV",1000);
+                    }
+                    
+                    ivwriter.write(iv.chromName+"\t"+windowStart+"\t"+windowEndPos+"\t"+iv.chromName+"."+(currWindow+1)+
+                        "\t1000\t.\t"+windowStart+"\t"+windowEndPos+"\t255,0,0\t"+
                         windowSpans.length +"\t"+
                         windowSpans.map{case (s,e) => e-s}.mkString(",")+"\t"+
                         windowSpans.map{case (s,e) => s - windowStart}.mkString(",")+
                         "\n");
+                    warning("Example interval: ("+windowStart+","+windowEndPos+"), "+windowSpans.map{ case (s,e) => "("+s+"-"+e+")"}.mkString(", "),"Note_example_IV",100);
+                    
                     currWindow += 1;
-                    currPos = (spannedWindowSize * (currWindow+1))
+                    currPos = (spannedWindowSize * currWindow)
                     windowStart = windowEndPos
                     windowSpans = Vector((windowEndPos,windowEndPos))
                   }
                   windowSpans = windowSpans.init :+ ((windowSpans.last._1,iv.end))
-                  currPos += iv.end - iv.start
+                  currPos = ivEndPos
+                  prevIV = Some(iv);
                 }}
                 ivwriter.flush();
               }
