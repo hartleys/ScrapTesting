@@ -41,7 +41,13 @@ object stdUtils {
     }
   }
   
-  
+  def addQuotesIfNeeded(s : String) : String = {
+    if(s.head == '\"' && s.last == '\"'){
+      return s;
+    } else {
+      return "\"" + s + "\"";
+    }
+  }
   
   def trimBrackets(s : String) : String = {
     var out = s;

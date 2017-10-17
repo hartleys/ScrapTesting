@@ -729,7 +729,7 @@ object VcfTool {
         (ctp(0),ctp(1));
       }).toMap;
       
-      SVcfCompoundHeaderLine(in_tag = tag, ID = tagmap("ID"), Number = tagmap("Number") ,  Type = tagmap("Number") , desc = tagmap.getOrElse("Description","."));
+      SVcfCompoundHeaderLine(in_tag = tag, ID = tagmap("ID"), Number = tagmap("Number") ,  Type = tagmap("Type") , desc = tagmap.getOrElse("Description","."));
     }
     
     /////////// Read Variant Lines:
@@ -757,7 +757,7 @@ object VcfTool {
   }
   
   case class SVcfCompoundHeaderLine(in_tag : String, var ID : String, var Number : String, var Type : String, var desc : String) extends 
-              SVcfHeaderLine(in_tag,"<ID="+ID+",Number="+Number+",Type="+Type+",Description=\""+desc+"\">") {
+              SVcfHeaderLine(in_tag,"<ID="+ID+",Number="+Number+",Type="+Type+",Description="+addQuotesIfNeeded(desc)+">") {
     //var tag : String = in_tag;
     //var value : String = "<ID="+ID+",Number="+Number+",Type="+Type+",Description=\""+desc+"\">";
   }

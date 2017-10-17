@@ -2650,6 +2650,20 @@ object VcfAnnotateTX {
       writer.close();
     }
     
+    val genotypeOrdering = new Ordering[String]{
+                        def compare(x : String, y : String) : Int = {
+                          if(x == y) 0;
+                          else if(x == ".") -1;
+                          else if(y == ".") 1;
+                          else {
+                            val xi = string2int(x);
+                            val yi = string2int(y);
+                            if(xi < yi) -1;
+                            else 1;
+                          }
+                        }
+                      }
+    
     def walkVCF(vcIter : Iterator[SVcfVariantLine], vcfHeader : SVcfHeader, verbose : Boolean = true) : (Iterator[SVcfVariantLine],SVcfHeader) = {
       
       
@@ -2660,15 +2674,17 @@ object VcfAnnotateTX {
                                         }}
       
       val extraInfoLines = Seq(
-               SVcfCompoundHeaderLine("INFO", "CallMismatch",        "1", "Integer", "Num genotypes that actively disagree"),
-               SVcfCompoundHeaderLine("INFO", "CallMismatch_Strict", "1", "Integer", "Num genotypes that do not give the exact same call"),
+               SVcfCompoundHeaderLine("INFO", "CallMismatch",        "1", "Integer", "Num genotypes that actively disagree (ie called in different ways)"),
+               SVcfCompoundHeaderLine("INFO", "CallMismatch_Strict", "1", "Integer", "Num genotypes that do not give the exact same call (including no-call vs call)"),
                SVcfCompoundHeaderLine("INFO", "ENSEMBLE_WARNINGS",   ".", "String", "List of warnings related to the ensemble calling"),
-               SVcfCompoundHeaderLine("INFO", "alle_callerSets",   "A", "String", "")
+               SVcfCompoundHeaderLine("INFO", "alle_callerSets",   "A", "String", "For each alt allele, which callers included the given allele.")
           )
       val extraFmtLines = Seq( 
                 SVcfCompoundHeaderLine("FORMAT", "MISMATCH", "1", "String", "All callers do not actively disagree."),
                 SVcfCompoundHeaderLine("FORMAT", "MISMATCH_STRICT", "1", "String", "All callers provide the same call."),
-                SVcfCompoundHeaderLine("FORMAT", "ENS_WARN", ".", "String", "")
+                SVcfCompoundHeaderLine("FORMAT", "CallerSupport", ".", "String", "List of callers that support the final call."),
+                SVcfCompoundHeaderLine("FORMAT", "HasSupport", "1", "String", "Final call is supported by at least one caller."),
+                SVcfCompoundHeaderLine("FORMAT", "ENS_WARN", ".", "String", "Warnings related to the ensemble calls.")
               );
       
       val customFmtLines = inputVcfTypes.map{t =>{
@@ -2679,8 +2695,8 @@ object VcfAnnotateTX {
                                         }}
       
       val newFmtLines = vcfHeader.formatLines ++ fmtTags.flatMap{ newTagLines =>
-                                        newTagLines.map(_._2) ++ customFmtLines.flatten
-      } ++ extraFmtLines;
+                                        newTagLines.map(_._2)
+      } ++ customFmtLines.flatten ++ extraFmtLines;
       
       /*
        Seq(
@@ -2724,6 +2740,13 @@ object VcfAnnotateTX {
           val vb = vc.getOutputLine();
           val altAlles = vc.alt;
           var ensembleWarnings = Set[String]();
+          val ploidy = vc.genotypes.genotypeValues(0)(0).split("/").length;
+
+          if(ploidy > 2){
+            warning("Ploidy greater than 2! Ploidy = "+ploidy,"POLYPLOID",100)
+          } else if(ploidy == 1){
+            warning("Haploid! Ploidy = "+ploidy,"HAPLOID",100)
+          }
           
           if(altAlles.length > 1){
             ensembleWarnings = ensembleWarnings + ("MULTIALLELIC");
@@ -2744,12 +2767,12 @@ object VcfAnnotateTX {
             val numLinesWithMatch = linesWithMatch.size;
             
             if(otherLines.length > 1){
-              warning("Multiple lines found at location (Caller "+inputVcfTypes(otherFileIdx)+", POS="+vcSeq.head.chrom+":"+currPos+")","MULTILINE_LOCUS",100);
+              warning("Multiple lines found at location (Caller "+inputVcfTypes(otherFileIdx)+", POS="+vcSeq.head.chrom+":"+currPos+")","MULTILINE_LOCUS_"+otherFileType,100);
               ensembleWarnings = ensembleWarnings + ("MULTILINELOCUS_"+inputVcfTypes(otherFileIdx));
             }
             
             if(numLinesWithMatch > 1){
-              warning("Multiple lines found at location that contain matches (Caller "+inputVcfTypes(otherFileIdx)+", POS="+vcSeq.head.chrom+":"+currPos+")","MULTIMATCHLINE_LOCUS",100);
+              warning("Multiple lines found at location that contain matches (Caller "+inputVcfTypes(otherFileIdx)+", POS="+vcSeq.head.chrom+":"+currPos+")","MULTIMATCHLINE_LOCUS_"+otherFileType,100);
             }
             
             if(! matchIdx.isEmpty){
@@ -2850,9 +2873,9 @@ object VcfAnnotateTX {
                       geno.zipWithIndex.foreach{case (g,i) => {
                         if(g == (otherAlleIdx + 1).toString()){
                           if(altGtFixedArray(sampIdx)(i) != "."){
-                              warning("Overwriting existing variant on a multiline merger!","OVERWRITE_VARIANT_ON_MULTILINE_MERGE",100);
-                              ensembleWarnings = ensembleWarnings + ("OVERWRITE_VARIANT_ON_MULTILINE_MERGE");
-                              sampleWarn(sampIdx) = sampleWarn(sampIdx) + "OVERWRITE_VARIANT_ON_MULTILINE_MERGE";
+                              warning("Overwriting existing variant on a multiline merger!","OVERWRITE_VARIANT_ON_MULTILINE_MERGE_"+otherFileType,100);
+                              ensembleWarnings = ensembleWarnings + ("OVERWRITE_VARIANT_ON_MULTILINE_MERGE_"+otherFileType);
+                              sampleWarn(sampIdx) = sampleWarn(sampIdx) + ("OVERWRITE_VARIANT_ON_MULTILINE_MERGE_"+otherFileType);
                           }
                           altGtFixedArray(sampIdx)(i) = (currAlleIdx + 1).toString;
                         }
@@ -2868,15 +2891,16 @@ object VcfAnnotateTX {
                       geno.zipWithIndex.foreach{case (g,i) => {
                         if(g == "0"){
                           if(altGtFixedArray(sampIdx)(i) != "."){
-                              warning("Overwriting existing variant on a multiline merger!","OVERWRITE_REFVARIANT_ON_MULTILINE_MERGE",100);
-                              ensembleWarnings = ensembleWarnings + ("OVERWRITE_REFVARIANT_ON_MULTILINE_MERGE");
-                              sampleWarn(sampIdx) = sampleWarn(sampIdx) + "OVERWRITE_VARIANT_ON_MULTILINE_MERGE";
+                              warning("Overwriting existing variant on a multiline merger!","OVERWRITE_REFVARIANT_ON_MULTILINE_MERGE_"+otherFileType,100);
+                              ensembleWarnings = ensembleWarnings + ("OVERWRITE_REFVARIANT_ON_MULTILINE_MERGE_"+otherFileType);
+                              sampleWarn(sampIdx) = sampleWarn(sampIdx) + ("OVERWRITE_VARIANT_ON_MULTILINE_MERGE_"+otherFileType);
                           } else {
                             altGtFixedArray(sampIdx)(i) = "0";
                           }
                         }
                       }}
                   }}
+
                   
                 } catch {
                   case e : Exception => {
@@ -2898,11 +2922,16 @@ object VcfAnnotateTX {
                 }
               }}
               
+              if(ploidy > 1){
+                Range(0,sampCt).foreach{sampIdx => {
+                      altGtFixedArray(sampIdx) = altGtFixedArray(sampIdx).sortBy(s => s)(genotypeOrdering)
+                }}
+              }
               vb.genotypes.fmt = vb.genotypes.fmt ++ fmtA.map{_._3} ++ fmtR.map{_._3} ++ fmtOther.map{_._3} ++ customFmtLines(otherFileIdx)
               vb.in_format = vb.in_format ++ fmtA.map{_._3.ID} ++ fmtR.map{_._3.ID} ++ fmtOther.map{_._3.ID} ++ customFmtLines(otherFileIdx).map(_.ID);
-              vb.genotypes.genotypeValues = (vb.genotypes.genotypeValues ++ fmtA.map{_._1.map(_.mkString(","))} ++ 
-                                             fmtR.map{_._1.map(_.mkString(","))} ++ 
-                                             fmtOther.map{_._1.map(_.mkString("|"))}) ++
+              vb.genotypes.genotypeValues = ( vb.genotypes.genotypeValues ++ fmtA.map{_._1.map(_.mkString(","))} ++ 
+                                              fmtR.map{_._1.map(_.mkString(","))} ++ 
+                                              fmtOther.map{_._1.map(_.mkString("|"))} ) ++
                                              Array(
                                                  altGtArray.map(_.mkString("|")),
                                                  altGtFixedArray.map(_.mkString("/"))
@@ -2912,6 +2941,7 @@ object VcfAnnotateTX {
                   )
             }
           }}
+          
           
           val masterGT = vb.genotypes.genotypeValues(0);
           val mm = Array.fill[Boolean](sampCt)(false);
@@ -2934,15 +2964,56 @@ object VcfAnnotateTX {
                 }}
               }
           }}
+          val gtTags = inputVcfTypes.map{ivt => { ivt+"_GT_FIX" }};
+          val gtSet  = gtTags.zip(gtTags.map{vb.format.indexOf(_)}).filter{ case (t,i) => i != -1};
+          
+          val gtCallerSupport = masterGT.indices.map{sampIdx => {
+            val mgt = masterGT(sampIdx);
+            if(! mgt.contains('.')){
+              gtSet.zip(inputVcfTypes).flatMap{ case ((otherTag,otherIdx),ivt) => {
+                if(vb.genotypes.genotypeValues(otherIdx)(sampIdx) == mgt){
+                  Some(ivt);
+                } else {
+                  None;
+                }
+              }}.mkString(",");
+            } else {
+              "NA"
+            }
+          }}.toArray;
+          val gtIsSupported = masterGT.indices.map{sampIdx => {
+            val mgt = masterGT(sampIdx).split("/");
+            mgt.forall{m => {
+              m == "." || {
+                gtSet.exists{ case (otherTag,otherIdx) => {
+                  val ogt = vb.genotypes.genotypeValues(otherIdx)(sampIdx).split("/");
+                  ogt.contains(m);
+                }}
+              }
+            }}
+          }}
+          val numUnsupportedGT = gtIsSupported.count(! _);
+          if(numUnsupportedGT > 0){
+            val warnMsg = "UNSUPPORTED_GT"
+            warning("Found "+numUnsupportedGT+ " unsupported genotypes!",warnMsg,100);
+            ensembleWarnings = ensembleWarnings + (warnMsg);
+          }
+          
           vb.genotypes.fmt = vb.genotypes.fmt ++ extraFmtLines
           vb.in_format = vb.in_format ++ extraFmtLines.map{efl => efl.ID}
-          vb.genotypes.genotypeValues = vb.genotypes.genotypeValues ++ Array(mm.map(if(_) "1" else "0"),mmStrict.map(if(_) "1" else "0"),sampleWarn.map{s => s.toSeq.sorted.mkString(",")})
+          vb.genotypes.genotypeValues = vb.genotypes.genotypeValues ++ 
+                                               Array(mm.map(if(_) "1" else "0"),
+                                                     mmStrict.map(if(_) "1" else "0"),
+                                                     gtCallerSupport,
+                                                     gtIsSupported.map(if(_) "1" else "0").toArray,
+                                                     sampleWarn.map{s => s.toSeq.padTo(1,".").sorted.mkString(",")})
+          
           
           vb.in_info = vb.in_info ++ Map(
                 ("CallMismatch",Some( mm.count(x => x).toString )),
                 ("CallMismatch_Strict",Some( mmStrict.count(x => x).toString )),
                 ("ENSEMBLE_WARNINGS",Some( ensembleWarnings.toSeq.sorted.padTo(1,".").mkString(",") )),
-                ("alle_callerSets",Some(callerSets.map{s => s.toSeq.sorted.mkString("|")}.mkString(",")))
+                ("alle_callerSets",Some(callerSets.map{s => s.toSeq.padTo(1,".").sorted.mkString("|")}.padTo(1,".").mkString(",")))
               );
           
           } catch {
