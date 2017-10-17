@@ -128,7 +128,7 @@ object VcfAnnotateTX {
 
      def run(args : Array[String]) {
        val out = parser.parseArguments(args.toList.tail);
-       if(out){ 
+       if(out){
          RedoDBNSFPannotation(
              dbnsfpfile = parser.get[String]("dbnsfpfile"),
              chromStyle = parser.get[String]("chromStyle"), 
@@ -428,6 +428,12 @@ object VcfAnnotateTX {
                                          argDesc = "If this flag is used, only write variants that have non-null alt alleles."+
                                                    "" // description
                                        ) ::
+                    new BinaryOptionArgument[List[String]](
+                                         name = "addBedTags", 
+                                         arg = List("--addBedTags"), 
+                                         valueName = "TAGTITLE:filedesc:bedfile.bed,TAGTITLE2:filedesc2:bedfile2.bed",  
+                                         argDesc =  "List of tags and bed files that define said tags. For each tag, the variant will have a tag value of 1 iff the variant appears on the bed file region, and 0 otherwise."
+                                        ) ::
                     new BinaryOptionArgument[String](
                                          name = "txInfoFile", 
                                          arg = List("--txInfoFile"), 
@@ -503,7 +509,8 @@ object VcfAnnotateTX {
                        addSummaryCLNSIG = parser.get[Boolean]("addSummaryCLNSIG"),
                        addCanonicalTags = parser.get[Option[String]]("addCanonicalTags"),
                        geneVariantsOnly = parser.get[Boolean]("geneVariantsOnly"),
-                       nonNullVariantsOnly = parser.get[Boolean]("nonNullVariantsOnly")
+                       nonNullVariantsOnly = parser.get[Boolean]("nonNullVariantsOnly"),
+                       addBedTags = parser.get[Option[List[String]]]("addBedTags")
              )
        }
      }
@@ -526,6 +533,7 @@ object VcfAnnotateTX {
                 addCanonicalTags : Option[String],
                 geneVariantsOnly : Boolean,
                 nonNullVariantsOnly : Boolean,
+                addBedTags : Option[List[String]],
                 bufferSize : Int = 32, 
                 vcfCodes : VCFAnnoCodes = VCFAnnoCodes()
                 ){
@@ -549,6 +557,7 @@ object VcfAnnotateTX {
                 txToGeneFile = txToGeneFile,
                 geneVariantsOnly = geneVariantsOnly,
                 bufferSize = bufferSize,
+                addBedTags = addBedTags,
                 vcfCodes =vcfCodes
                 )
         ) ++ (
@@ -642,10 +651,79 @@ object VcfAnnotateTX {
                 chromList : Option[List[String]],
                 txToGeneFile : Option[String],
                 bufferSize : Int = 32, 
+                addBedTags : Option[List[String]],
                 vcfCodes : VCFAnnoCodes = VCFAnnoCodes()
                 ) extends internalUtils.VcfTool.VCFWalker {
       
       reportln("Starting TX parse...","progress");
+       
+      val bedTags : Seq[(String,String,internalUtils.commonSeqUtils.GenomicInterval => Boolean)] = addBedTags match {
+        case Some(bt) => {
+          bt.map{b => {
+            val pair : Array[String] = b.split(":");
+            if(pair.length != 3) error("Each comma-delimited element of parameter addBedTags must have exactly 3 colon-delimited elements (tag:desc:filename.bed).")
+            val (t,desc,f) : (String,String,String) = (pair(0),pair(1),pair(2));
+            val arr : internalUtils.genomicAnnoUtils.GenomicArrayOfSets[String] = internalUtils.genomicAnnoUtils.GenomicArrayOfSets[String](false);
+            val lines = getLinesSmartUnzip(f);
+            lines.foreach(line => {
+              val cells = line.split("\t");
+              val (chrom,start,end) = (cells(0),string2int(cells(1)),string2int(cells(2)))
+              arr.addSpan(internalUtils.commonSeqUtils.GenomicInterval(chrom, '.', start,end), "CE");
+            })
+            arr.finalizeStepVectors;
+            val isOnBedFunc : (internalUtils.commonSeqUtils.GenomicInterval => Boolean) = {
+              (iv : internalUtils.commonSeqUtils.GenomicInterval) => {
+                ! arr.findIntersectingSteps(iv).foldLeft(Set[String]()){case (soFar,(iv,currSet)) => {
+                  soFar ++ currSet;
+                }}.isEmpty
+              }
+            }
+            (t,desc,isOnBedFunc)
+          }}
+        }
+        case None => {
+          Seq();
+        }
+      }
+      
+      /*
+       * 
+    val conservedArray = conservedElementFile match {
+      case Some(f) => {
+        reportln("reading conserved locus file ["+stdUtils.getDateAndTimeString+"]","debug");
+        val arr : genomicAnnoUtils.GenomicArrayOfSets[String] = genomicAnnoUtils.GenomicArrayOfSets[String](false);
+        val lines = getLinesSmartUnzip(f);
+        
+        lines.foreach(line => {
+          val cells = line.split("\t");
+          val (chrom,start,end) = (cells(0),string2int(cells(1)),string2int(cells(2)))
+          arr.addSpan(commonSeqUtils.GenomicInterval(chrom, '.', start,end), "CE");
+        })
+        arr.finalizeStepVectors;
+        reportln("done with conserved locus file ["+stdUtils.getDateAndTimeString+"]","debug");
+        Some(arr);
+      }
+      case None => {
+        None;
+      }
+    }
+    val locusIsConserved  : (commonSeqUtils.GenomicInterval => Boolean) = conservedArray match {
+      case Some(arr) => {
+        (iv : commonSeqUtils.GenomicInterval) => {
+          ! arr.findIntersectingSteps(iv).foldLeft(Set[String]()){case (soFar,(iv,currSet)) => {
+            soFar ++ currSet;
+          }}.isEmpty
+        }
+      }
+      case None => {
+        (iv : commonSeqUtils.GenomicInterval) => {
+          true;
+        }
+      }
+    }
+       * 
+       */
+      
       
       val chromSet = chromList match {
         case Some(lst) => Some(lst.toSet);
@@ -742,7 +820,9 @@ object VcfAnnotateTX {
         List(
           new VCFInfoHeaderLine(vcfCodes.geneIDs, VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.String, "Gene Symbol for each tx.")    
         )
-      })
+      }) ++ bedTags.map{ case (tagString,descString,bedFunction) => {
+          new VCFInfoHeaderLine(tagString, 1, VCFHeaderLineType.Integer, "Variant is found on bed file "+descString)
+      }}
       
       val newHeader = internalUtils.VcfTool.addHeaderLines(vcfHeader,newHeaderLines);
       
@@ -766,7 +846,7 @@ object VcfAnnotateTX {
       
       return ((
         vcIter.map(v => {
-             annotateVcfStreamOpt(v,summaryWriter,vcfCodes,bufferSize,txgaos,TXSeq,txToGene,geneVariantsOnly=geneVariantsOnly)
+             annotateVcfStreamOpt(v,summaryWriter,vcfCodes,bufferSize,txgaos,TXSeq,txToGene,geneVariantsOnly=geneVariantsOnly,bedTags=bedTags)
         }).filter(_.isDefined).map(_.get), newHeader ));
       }
     }
@@ -775,7 +855,8 @@ object VcfAnnotateTX {
                         bufferSize : Int, txgaos : GenomicArrayOfSets[String],
                         TXSeq : scala.collection.mutable.Map[String,TXUtil],
                         txToGene : Option[(String => String)],
-                        geneVariantsOnly : Boolean) : Option[VariantContext] = {
+                        geneVariantsOnly : Boolean,
+                        bedTags : Seq[(String,String,internalUtils.commonSeqUtils.GenomicInterval => Boolean)]) : Option[VariantContext] = {
       var vb = new htsjdk.variant.variantcontext.VariantContextBuilder(v);
       var vTypeList = Vector[Vector[String]]();
       var vMutG = Vector[String]();
@@ -876,6 +957,13 @@ object VcfAnnotateTX {
         vb = vb.attribute(vcfCodes.vMutPShort_TAG, vMutPshort.toList.asJava);
         vb = vb.attribute(vcfCodes.vMutLVL_TAG,  vLevel.toList.asJava);
         vb = vb.attribute(vcfCodes.vMutINFO_TAG, mkSubDelimList(vInfo,vcfCodes.delims));
+        
+        if(! bedTags.isEmpty){
+          val variantIV = internalUtils.commonSeqUtils.GenomicInterval(v.getContig(),'.', start = v.getStart() - 1, end = math.max(v.getEnd(),v.getStart+1));
+          bedTags.foreach{ case (tagString,desc,bedFunction) => {
+            vb = vb.attribute(tagString, if(bedFunction(variantIV)) "1" else "0");
+          }}
+        }
       }
       return Some(vb.make());
   }
@@ -2823,7 +2911,7 @@ object VcfAnnotateTX {
     }
   }
 
-  case class CalcVariantCountSummary(genotypeTag : String = "GT", keepAltChrom : Boolean = false) {
+  case class CalcVariantCountSummary(genotypeTag : String = "GT", keepAltChrom : Boolean = false, singletonGTfile : Option[String] = None, subfilterExpression : Option[String] = None) {
     
     case class VariantCountSet(
         ctHet : Array[Long],
@@ -2869,6 +2957,59 @@ object VcfAnnotateTX {
       )
     }
     
+    case class VariantCountSetSet(varCt : VariantCountSet,
+                                  singCt : VariantCountSet,
+                                  indelCt : VariantCountSet,
+                                  indelSingCt : VariantCountSet,
+                                  snvCt : VariantCountSet,
+                                  snvSingCt : VariantCountSet
+                                 ){
+      def addVariant(gt : Array[String],isSingleton : Boolean, isIndel : Boolean){
+        varCt.addVC(gt);
+        if(isSingleton){
+          singCt.addVC(gt);
+        }
+        if(isIndel){
+          indelCt.addVC(gt);
+          if(isSingleton){
+            indelSingCt.addVC(gt);
+          }
+        } else {
+          snvCt.addVC(gt);
+          if(isSingleton){
+            snvSingCt.addVC(gt);
+          }
+        }
+      }
+    }
+    def makeVariantCountSetSet(ct : Int) : VariantCountSetSet = {
+      VariantCountSetSet(varCt = makeVariantCountSet(ct),
+                                  singCt  = makeVariantCountSet(ct),
+                                  indelCt  = makeVariantCountSet(ct),
+                                  indelSingCt  = makeVariantCountSet(ct),
+                                  snvCt  = makeVariantCountSet(ct),
+                                  snvSingCt  = makeVariantCountSet(ct)
+                                 )
+    }
+    
+    val singletonWriter = singletonGTfile match {
+      case Some(f) => {
+        Some(openWriterSmart(f))
+      }
+      case None => None;
+    }
+    
+    def writeSingGT(s : String){
+      singletonWriter match {
+        case None => {
+          //do nothing
+        }
+        case Some(w) => {
+          w.write(s);
+        }
+      }
+    }
+    
     def walkVCFFile(infile :String, inputFileList : Boolean, outfile : String, chromList : Option[List[String]], numLinesRead : Option[Int]){
       val (vcIter, vcfHeader) = getSVcfIterators(infile,chromList,numLinesRead,inputFileList);
       val sampleCt = vcfHeader.sampleCt;
@@ -2884,90 +3025,26 @@ object VcfAnnotateTX {
       var numSingletons = 0;
       var numIndel = 0;
       var numSnv = 0;
+      var numFiltVar = 0;
       
-    //val snvCtMap : Seq[(String,String)];
+      val vcss : Option[(SFilterLogic[SVcfVariantLine],VariantCountSetSet)] = subfilterExpression match {
+        case Some(filterExpr) => {
+          val parser : SVcfFilterLogicParser = internalUtils.VcfTool.SVcfFilterLogicParser();
+          val filter : SFilterLogic[SVcfVariantLine] = parser.parseString(filterExpr);
+          Some((filter,makeVariantCountSetSet(sampleCt)))
+        }
+        case None => None;
+      }
       
       vcIter.filter{vc => vc.genotypes.fmt.contains(genotypeTag) & vc.alt.length > 0}.foreach{vc => {
         if(vc.alt.length > 2) error("Fatal error: multiallelic variant! This utility is only intended to work after splitting multiallelic variants!")
-        //val alts = vc.alt.filter(_ != "*");
         val alt : String = vc.alt.head;
         val ref : String = vc.ref;
-        //val gtIdx = vc.genotypes.fmt.indexOf(genotypeTag);
-        //val gt = vc.genotypes.genotypeValues(gtIdx)
         val gt : Array[String] = vc.getGt(genotypeTag);
-        // alts.zipWithIndex.foreach{ case (alt,altIdx) => {
         val numAlt = gt.count{ gt => gt.contains('1') }
         val isSingleton = (numAlt == 1);
         val isIndel = ref.length != 1 || alt.length != 1;
         numVariants = numVariants + 1;
-        
-        /*
-        val gtZip = gt.zipWithIndex;
-        val refSamps = gtZip.filter{ case (gt,idx) => gt == "0/0"};
-        val hetSamps = gtZip.filter{ case (gt,idx) => gt == "0/1"};
-        val altSamps = gtZip.filter{ case (gt,idx) => gt == "1/1"};
-        val othAltSamps = gtZip.filter{ case (gt,idx) => gt.contains('1') && gt != "0/1" && gt != "1/1"};
-        val otherSamps = gtZip.filter{ case (gt,idx) => (! gt.contains('1')) && gt != "0/0" && gt != "./."};
-        val misSamps = gtZip.filter{ case (gt,idx) => gt == "./."}
-        
-        refSamps.foreach{ case (gt,idx) => {
-          varCt.ctRef(idx) += 1;
-          if(isIndel){
-            indelCt.ctRef(idx) += 1;
-          } else {
-            snvCt.ctRef(idx) += 1;
-          }
-        }}
-        hetSamps.foreach{ case (gt,idx) => {
-          varCt.ctHet(idx) += 1;
-          if(isSingleton) singCt.ctHet(idx) += 1;
-          if(isIndel){
-            indelCt.ctHet(idx) += 1;
-            if(isSingleton) indelSingCt.ctHet(idx) += 1;
-          } else {
-            snvCt.ctHet(idx) += 1;
-            if(isSingleton) snvSingCt.ctHet(idx) += 1;
-          }
-        }}
-        altSamps.foreach{ case (gt,idx) => {
-                                  varCt.ctAlt(idx) += 1;
-          if(isSingleton)        singCt.ctAlt(idx) += 1;
-          if(isIndel){
-                                indelCt.ctAlt(idx) += 1;
-            if(isSingleton) indelSingCt.ctAlt(idx) += 1;
-          } else {
-                                snvCt.ctAlt(idx) += 1;
-            if(isSingleton) snvSingCt.ctAlt(idx) += 1;
-          }
-        }}
-        othAltSamps.foreach{ case (gt,idx) => {
-                                  varCt.ctOthWithAlt(idx) += 1;
-          if(isSingleton)        singCt.ctOthWithAlt(idx) += 1;
-          if(isIndel){
-                                indelCt.ctOthWithAlt(idx) += 1;
-            if(isSingleton) indelSingCt.ctOthWithAlt(idx) += 1;
-          } else {
-                                snvCt.ctOthWithAlt(idx) += 1;
-            if(isSingleton) snvSingCt.ctOthWithAlt(idx) += 1;
-          }
-        }}
-        otherSamps.foreach{ case (gt,idx) => {
-          varCt.ctOthWithAlt(idx) += 1;
-          if(isIndel){
-            indelCt.ctOthWithAlt(idx) += 1;
-          } else {
-            snvCt.ctOthWithAlt(idx) += 1;
-          }
-        }}
-        misSamps.foreach{ case (gt,idx) => {
-          varCt.ctOthWithAlt(idx) += 1;
-          if(isIndel){
-            indelCt.ctOthWithAlt(idx) += 1;
-          } else {
-            snvCt.ctOthWithAlt(idx) += 1;
-          }
-        }}*/
-        
           varCt.addVC(gt);
           
           if(isSingleton){
@@ -2987,8 +3064,18 @@ object VcfAnnotateTX {
               snvSingCt.addVC(gt);
             }
           }
-          
-        //}}
+        vcss match {
+          case Some((filter,countSetSet)) => {
+            if(filter.keep(vc)) {
+              numFiltVar = numFiltVar + 1;
+              countSetSet.addVariant(gt=gt,isSingleton=isSingleton,isIndel=isIndel);
+            }
+          }
+          case None =>{
+            //do nothing
+          }
+        }
+        
       }}
       
       val allTitles : Seq[String] = Seq("HomRef","Het","HomAlt","OtherAlt","Other")
@@ -3002,6 +3089,21 @@ object VcfAnnotateTX {
                    altTitles.map(t => "SING_" + t).mkString("\t")+"\t"+
                    altTitles.map(t => "SINGSNV_" + t).mkString("\t")+"\t"+
                    altTitles.map(t => "SINGINDEL_" + t).mkString("\t")+
+                   (vcss match {
+                      case Some((filt,css)) => {
+                        "\t"+
+                        "FILT_numCalled\tFILT_numMiss\t"+
+                        allTitles.map(t => "FILT_" + t).mkString("\t")+"\t"+
+                        allTitles.map(t => "FILT_SNV_" + t).mkString("\t")+"\t"+
+                        allTitles.map(t => "FILT_INDEL_" + t).mkString("\t")+"\t"+
+                        altTitles.map(t => "FILT_SING_" + t).mkString("\t")+"\t"+
+                        altTitles.map(t => "FILT_SINGSNV_" + t).mkString("\t")+"\t"+
+                        altTitles.map(t => "FILT_SINGINDEL_" + t).mkString("\t")
+                      }
+                      case None => {
+                        ""
+                      }
+                   })+
                    "\n")
       Range(0,sampleCt).foreach(i => {
         writer.write(Seq(
@@ -3014,9 +3116,28 @@ object VcfAnnotateTX {
             singCt.getAlt(i),
             snvSingCt.getAlt(i),
             indelSingCt.getAlt(i)
-        ).mkString("\t") + "\n");
+        ).mkString("\t") + 
+        (vcss match {
+            case Some((filt,css)) => {
+              "\t"+Seq(
+                  numFiltVar - css.varCt.ctMis(i),
+                  css.varCt.ctMis(i),
+                  css.varCt.getAll(i),
+                  css.snvCt.getAll(i),
+                  css.indelCt.getAll(i),
+                  css.singCt.getAlt(i),
+                  css.snvSingCt.getAlt(i),
+                  css.indelSingCt.getAlt(i)
+              ).mkString("\t")
+            }
+            case None => ""
+        }) +
+        "\n");
       })
       writer.close();
+      
+      
+      
     }
   }
 
@@ -3053,6 +3174,12 @@ object VcfAnnotateTX {
                                          valueName = "chr1,chr2,...",  
                                          argDesc =  "List of chromosomes. If supplied, then all analysis will be restricted to these chromosomes. All other chromosomes wil be ignored."
                                         ) ::
+                    new BinaryOptionArgument[String](
+                                         name = "subFilterExpression", 
+                                         arg = List("--subFilterExpression"), 
+                                         valueName = "",  
+                                         argDesc =  ""
+                                        ) ::
                     new FinalArgument[String](
                                          name = "infile",
                                          valueName = "variants.vcf",
@@ -3069,7 +3196,8 @@ object VcfAnnotateTX {
        val out = parser.parseArguments(args.toList.tail);
        if(out){
          CalcVariantCountSummary(
-             genotypeTag = parser.get[String]("genotypeTag")
+             genotypeTag = parser.get[String]("genotypeTag"),
+             subfilterExpression = parser.get[Option[String]]("subFilterExpression")
          ).walkVCFFile(
              infile = parser.get[String]("infile"), inputFileList = parser.get[Boolean]("inputFileList"),
              outfile = parser.get[String]("outfile"),
@@ -3721,7 +3849,13 @@ object VcfAnnotateTX {
                                          valueName = "chr1,chr2,...",  
                                          argDesc =  "List of chromosomes. If supplied, then all analysis will be restricted to these chromosomes. All other chromosomes wil be ignored."
                                         ) ::
-                    new BinaryOptionArgument[List[String]](
+                    new BinaryOptionArgument[String](
+                                         name = "variantFile", 
+                                         arg = List("--variantFile"), 
+                                         valueName = "varfile.txt",  
+                                         argDesc =  ""
+                                        ) ::
+                    new BinaryOptionArgument[String](
                                          name = "variantFilterExpression", 
                                          arg = List("--variantFilterExpression"), 
                                          valueName = "...",  
@@ -3765,7 +3899,12 @@ object VcfAnnotateTX {
                                            argDesc = "", 
                                            defaultValue = Some("\t")
                                            ) :: 
-                                           
+                    new BinaryArgument[String](name = "gtTagString",
+                                           arg = List("--gtTagString"),  
+                                           valueName = "\\t", 
+                                           argDesc = "", 
+                                           defaultValue = Some("GT")
+                                           ) ::    
                     new FinalArgument[String](
                                          name = "infile",
                                          valueName = "infile.vcf.gz",
@@ -3787,7 +3926,9 @@ object VcfAnnotateTX {
              naString = parser.get[String]("naString"),
              multiAlleString = parser.get[String]("otherString"),
              writeHeader = parser.get[Boolean]("writeHeaderRow"),
-             writeTitleColumn = parser.get[Boolean]("writeTitleColumn")
+             writeTitleColumn = parser.get[Boolean]("writeTitleColumn"),
+             variantFile = parser.get[Option[String]]("variantFile"),
+             gtTagString = parser.get[String]("gtTagString")
          ).walkVCFFile(
              infile = parser.get[String]("infile"),
              outfile = parser.get[String]("outfile"),
@@ -3802,7 +3943,9 @@ object VcfAnnotateTX {
   
   case class VcfToMatrix(variantsAsRows : Boolean = false, columnDelim : String = "\t", 
                          naString : String = "NA", multiAlleString : String = "NA",
-                         writeHeader : Boolean = false, writeTitleColumn : Boolean = false)  {
+                         writeHeader : Boolean = false, writeTitleColumn : Boolean = false,
+                         variantFile : Option[String] = None,
+                         gtTagString : String = "GT")  {
     
     def walkVCFFile(infile : String, outfile : String, 
                     variantFilterExpression : Option[String] = None,
@@ -3830,7 +3973,7 @@ object VcfAnnotateTX {
         val chromSet = chromList.get.toSet;
         val (vh,vi) = SVcfLine.readVcf(indata,withProgress = true)
         (vh,vi.filter(line => { chromSet.contains(line.chrom) }))
-      }
+      } 
       
       
       val (vcIter2,vcfHeader2) = variantFilterExpression match {
@@ -3871,7 +4014,8 @@ object VcfAnnotateTX {
             Iterator[String]();
           }
         ) ++ vcIter.zipWithIndex.map{ case (vc,i) => {
-          (if(writeTitleColumn){ i+columnDelim } else {""}) + vc.genotypes.genotypeValues(0).map{ g => {
+          val gtIdx = vc.format.indexOf(gtTagString);
+          (if(writeTitleColumn){ i+columnDelim } else {""}) + vc.genotypes.genotypeValues(gtIdx).map{ g => {
             if(g == "./." || g == "."){
               "."
             } else if(g == "0/0"){
@@ -3886,8 +4030,9 @@ object VcfAnnotateTX {
           }}.mkString(columnDelim);
         }}
       } else {
-        val genoArray = vcIter.map{ vc => {
-          vc.genotypes.genotypeValues(0).map{ g => {
+        val (genoArray,varArray) = vcIter.map{ vc => {
+          val gtIdx = vc.format.indexOf(gtTagString);
+          (vc.genotypes.genotypeValues(gtIdx).map{ g => {
             if(g == "./." || g == "."){
               naString
             } else if(g == "0/0" || g == "0"){
@@ -3899,9 +4044,24 @@ object VcfAnnotateTX {
             } else {
               multiAlleString
             }
-          }}
-        }}.toVector;
+          }},
+            vc.getSimpleVcfString()
+          )
+        }}.toVector.unzip
+        
         reportln("Writing "+genoArray.length+" variants, "+genoArray(0).length+" samples.","note");
+        variantFile match {
+          case Some(f) => {
+            val writer = openWriterSmart(f);
+            varArray.foreach{v => {
+              writer.write(v + "\n");
+            }}
+            writer.close();
+          }
+          case None => {
+            //do nothing
+          }
+        }
         (
           if(writeHeader){
             Iterator[String](genoArray(0).indices.mkString(columnDelim))
@@ -3909,15 +4069,17 @@ object VcfAnnotateTX {
             Iterator[String]();
           }
         ) ++ genoArray(0).indices.iterator.map{ j => {
-          (if(writeTitleColumn){ sampleList.mkString(columnDelim) } else {""})+ genoArray.indices.map{ i => {
+          (if(writeTitleColumn){ sampleList(j) + columnDelim} else {""})+ genoArray.indices.map{ i => {
             genoArray(i)(j)
           }}.mkString(columnDelim)
         }}
+        
+        
       }
     }
   }
   
-  case class VcfExpressionFilter(filterExpr : String) extends SVcfWalker {
+  case class VcfExpressionFilter(filterExpr : String, explainFile : Option[String] = None) extends SVcfWalker {
 
     /*def walkVCF(vcIter : Iterator[SVcfVariantLine], vcfHeader : SVcfHeader, verbose : Boolean = true) : (Iterator[SVcfVariantLine],SVcfHeader) = {
        (vcIter, vcfHeader)

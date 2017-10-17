@@ -904,6 +904,8 @@ object VcfTool {
        //in_header = header
       )
     }
+    def getSimpleVcfString() : String = chrom + "\t"+pos+"\t"+id+"\t"+ref+"\t"+alt.mkString(",")+"\t"+qual+"\t"+filter;
+    
     def getGt(gtTag : String) : Array[String] = {
       error("Op not supported!");
       null;
@@ -1271,7 +1273,7 @@ object VcfTool {
     }
     def tagMissing(tag : String, a : SVcfVariantLine) : Boolean = {
       (! a.info.containsKey(tag)) || a.info(tag).get == "."
-    }
+    } 
     
     //Map(funcID) = (numParam,desc,metaFunction(params) => function(vc))
     val filterFunctionSetVal : Set[FilterFunction] = Set[FilterFunction]( 
@@ -1417,7 +1419,7 @@ object VcfTool {
                           }
                         }
                       ),
-        FilterFunction(funcName="INFO.inAnyOf", numParam = 2,desc="",
+        FilterFunction(funcName="INFO.inAnyOf", numParam = -1,desc="",
                         (params : Seq[String]) => {
                           val tag = params(0);
                           val v = params.tail.toSet;

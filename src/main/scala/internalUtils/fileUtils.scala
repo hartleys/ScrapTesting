@@ -27,6 +27,16 @@ object fileUtils {
    * Helpers:
    */
   
+  def createDummyFile(f : String,
+                      message : String = "# Note: if this file EXISTS, then either a job is currently running, or else the job crashed.",
+                      existsWarn : String = "Warning: Run File Already Exists! Is this a rerun?"){
+          val file = new java.io.File(f)
+          if(file.exists()) warning(existsWarn,"fileAlreadyExists",-1);
+          val w = new java.io.BufferedWriter(new java.io.FileWriter(file));
+          w.write(message);
+          w.close();
+  }
+  
   def getTableFromLines(lines : Iterator[String],colNames : Seq[String], errorName : String = "", delim : String = "\t", stripHash : Boolean = true) : Iterator[Seq[String]] = {
     if(! lines.hasNext()){
       error("Bad input: No lines found in "+ errorName);
@@ -256,7 +266,12 @@ object fileUtils {
     });
   }
   
-  def getLinesSmartUnzip(infile : String, allowStdin : Boolean = false) : Iterator[String] = {
+  val DEFAULT_UTF8_CODEC = new scala.io.Codec(java.nio.charset.Charset.forName("UTF-8"));
+  DEFAULT_UTF8_CODEC.onMalformedInput(java.nio.charset.CodingErrorAction.IGNORE);
+  DEFAULT_UTF8_CODEC.onUnmappableCharacter(java.nio.charset.CodingErrorAction.IGNORE);  
+  
+  def getLinesSmartUnzip_OLD(infile : String, allowStdin : Boolean = false) : Iterator[String] = {
+    
     if(allowStdin && infile == "-"){
       return io.Source.stdin.getLines;
     }
@@ -266,6 +281,20 @@ object fileUtils {
     }
     if(infile.length > 4 && infile.takeRight(4) == ".zip"){
         return scala.io.Source.fromInputStream(new ZipInputStream(new BufferedInputStream(new FileInputStream(infile)))).getLines;
+    }
+    return getLines(infile);
+  }
+  
+  def getLinesSmartUnzip(infile : String, allowStdin : Boolean = false) : Iterator[String] = {
+    if(allowStdin && infile == "-"){
+      return io.Source.stdin.getLines;
+    }
+    
+    if(infile.length > 3 && infile.takeRight(3) == ".gz"){
+        return scala.io.Source.fromInputStream(new GZIPInputStream(new BufferedInputStream(new FileInputStream(infile))))(DEFAULT_UTF8_CODEC).getLines;
+    }
+    if(infile.length > 4 && infile.takeRight(4) == ".zip"){
+        return scala.io.Source.fromInputStream(new ZipInputStream(new BufferedInputStream(new FileInputStream(infile))))(DEFAULT_UTF8_CODEC).getLines;
     }
     return getLines(infile);
   }

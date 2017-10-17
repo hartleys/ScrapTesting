@@ -9,9 +9,9 @@ import internalUtils.commandLineUI._;
 
 object runner {
   
-  final val UTIL_VERSION = "1.6.50"; // REPLACE_THIS_QORTS_VERSION_VARIABLE_WITH_VERSION_NUMBER          (note this exact text is used in a search-and-replace. Do not change it.)
-  final val UTIL_COMPILE_DATE = "Mon Aug  7 12:56:46 EDT 2017"; // REPLACE_THIS_QORTS_DATE_VARIABLE_WITH_DATE          (note this exact text is used in a search-and-replace. Do not change it.)
-  final val UTIL_COMPILE_TIME : Long = 1502125006; // REPLACE_THIS_QORTS_DATE_VARIABLE_WITH_TIME          (note this exact text is used in a search-and-replace. Do not change it.)
+  final val UTIL_VERSION = "1.6.60"; // REPLACE_THIS_QORTS_VERSION_VARIABLE_WITH_VERSION_NUMBER          (note this exact text is used in a search-and-replace. Do not change it.)
+  final val UTIL_COMPILE_DATE = "Tue Aug 15 14:22:02 EDT 2017"; // REPLACE_THIS_QORTS_DATE_VARIABLE_WITH_DATE          (note this exact text is used in a search-and-replace. Do not change it.)
+  final val UTIL_COMPILE_TIME : Long = 1502821322; // REPLACE_THIS_QORTS_DATE_VARIABLE_WITH_TIME          (note this exact text is used in a search-and-replace. Do not change it.)
 
   final val UTIL_MAJOR_VERSION = UTIL_VERSION.split("\\.")(0);
   final val UTIL_MINOR_VERSION = UTIL_VERSION.split("\\.")(1);
@@ -116,6 +116,10 @@ object runner {
       internalUtils.Reporter.init_stderrOnly();
     }
     
+    if(args.contains("--createRunningFile")){
+      val idx = args.indexOf("--createRunningFile");
+    }
+    
     internalUtils.Reporter.reportln("Starting Util v"+UTIL_VERSION+" (Compiled " + UTIL_COMPILE_DATE + ")","note");
     internalUtils.Reporter.reportln("Starting time: ("+(new java.util.Date()).toString+")","note");
     
@@ -137,6 +141,7 @@ object runner {
 		      case Some(makerFcn) => {
 		        val cmdRunner = makerFcn();
 		        cmdRunner.run(args);
+		        cmdRunner.parser.close();
 		      }
 		      case None => {
 		        if(! allowDepreciated) {
@@ -149,6 +154,7 @@ object runner {
 		              internalUtils.Reporter.reportln("WARNING: Running Beta tool: " + args(0),"warn");
 		              val cmdRunner = makerFcn();
 		              cmdRunner.run(args);
+		              cmdRunner.parser.close();
 		            }
 		            case None => {
 		              internalUtils.Reporter.reportln("[runner.runner Error]: Command " + args(0) + " not found!","output");

@@ -14,6 +14,29 @@ object stdUtils {
    * Math:
    **************************************************************************************************************************/
   
+  case class ReservoirSampler[A](K : Int, seed : Option[Int] = None)(implicit arg0: scala.reflect.ClassTag[A]){
+    val reservoir : Array[A] = arg0.newArray(K);
+    val rand : scala.util.Random = seed match {
+      case Some(s) => new scala.util.Random(s);
+      case None => new scala.util.Random();
+    }
+    var n : Int = 1;
+    def sample(a : A){
+      if(n <= K){
+        reservoir(n-1) = a;
+      } else {
+        val r = rand.nextInt(n)+1;
+        if(r <= K){
+          reservoir(r-1) = a;
+        }
+      }
+      n = n + 1;
+    }
+    def getSample : Array[A] = {
+      reservoir.filter(_ != null);
+    }
+  }
+  
   def getFirstDigitOfInt(x : Int) : Int = {
     val xs = x.toString();
     if(xs.head == '-'){

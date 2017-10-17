@@ -178,7 +178,7 @@ class helpDocs extends CommandLineRunUtil {
           quickSynopsis = "", 
           synopsis = "", 
           description = "",   
-          argList =  List()
+          argList =  internalUtils.commandLineUI.CLUI_UNIVERSAL_ARGS
       );
     
     def run(args : Array[String]){

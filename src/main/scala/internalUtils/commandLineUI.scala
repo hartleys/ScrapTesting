@@ -9,6 +9,51 @@ import internalUtils.stdUtils._;
 object commandLineUI {
 
 
+  abstract class StringParser[T]{
+    def parse(s : String) : T;
+    def argType : String;
+    def unsetValue : T;
+  }
+  implicit object stringStringParser extends StringParser[String]{
+    def parse(s : String) : String = s;
+    def argType : String = "String";
+    def unsetValue : String = "";
+  }
+  implicit object intStringParser extends StringParser[Int]{
+    def parse(s : String) : Int = string2int(s);
+    def argType : String = "Int";
+    def unsetValue : Int = -1;
+  }
+  implicit object doubleStringParser extends StringParser[Double]{
+    def parse(s : String) : Double = string2double(s);
+    def argType : String = "Double";
+    def unsetValue : Double = -1;
+  }
+  implicit object floatStringParser extends StringParser[Float]{
+    def parse(s : String) : Float = string2float(s);
+    def argType : String = "Float";
+    def unsetValue : Float = -1;
+  }
+  implicit object commaListStringParser extends StringParser[List[String]]{
+    def parse(s : String) : List[String] = s.split(",").toList;
+    def argType : String = "CommaDelimitedListOfStrings";
+    def unsetValue : List[String] = List();
+  }
+  implicit object commaListDoubleParser extends StringParser[List[Double]]{
+    def parse(s : String) : List[Double] = s.split(",").map(string2double(_)).toList;
+    def argType : String = "CommaDelimitedListOfDoubles";
+    def unsetValue : List[Double] = List();
+  }
+  implicit object commaListIntParser extends StringParser[List[Int]]{
+    def parse(s : String) : List[Int] = s.split(",").map(string2int(_)).toList;
+    def argType : String = "CommaDelimitedListOfDoubles";
+    def unsetValue : List[Int] = List();
+  }
+  implicit object commaListFloatParser extends StringParser[List[Float]]{
+    def parse(s : String) : List[Float] = s.split(",").map(string2float(_)).toList;
+    def argType : String = "CommaDelimitedListOfDoubles";
+    def unsetValue : List[Float] = List();
+  }
   
   final val HELP_COMMAND_LIST : List[String] = List();
   final val MANUAL_COMMAND_LIST : List[String] = List("?","'?'", "\"?\"","man","-man","--man", "help", "-help", "--help");
@@ -92,7 +137,33 @@ List(
                                          arg = List("--debugMode"), // name of value
                                          argDesc = "Flag to indicate that much more debugging information should be sent to stderr." // description
                                        ) :: 
+                    new BinaryOptionArgument[String](
+                                         name = "createRunningFile", 
+                                         arg = List("--createRunningFile"), 
+                                         valueName = "filename.txt",  
+                                         argDesc =  "A file to create when this utility starts, to be deleted on a clean exit. The file WILL be deleted even if errors are caught. It will only remain if uncaught errors are thrown or if the process is killed externally."
+                                        ) ::
+                    new BinaryOptionArgument[String](
+                                         name = "successfulCompletionFile", 
+                                         arg = List("--successfulCompletionFile"), 
+                                         valueName = "filename.txt",  
+                                         argDesc =  "A file to create if and when this utility successfully completes without fatal errors."
+                                        ) ::
+                    new BinaryOptionArgument[String](
+                                         name = "warnCompletionFile", 
+                                         arg = List("--warnCompletionFile"), 
+                                         valueName = "filename.txt",  
+                                         argDesc =  "NOT YET IMPLEMENTED: A file to create if and when this utility successfully completes with WARNINGS OR ERRORS."
+                                        ) ::
+                    new BinaryOptionArgument[String](
+                                         name = "errorCompletionFile", 
+                                         arg = List("--errorCompletionFile"), 
+                                         valueName = "filename.txt",  
+                                         argDesc =  "NOT YET IMPLEMENTED: A file to create if and when this utility successfully completes with caught ERRORS. Note that if the utility is killed externally or if errors are thrown to the JVM, this file will NOT be created."
+                                        ) ::
                                        List();
+  
+  
   
   class CommandLineArgParser(command : String, quickSynopsis : String, synopsis : String, description : String,  argList : List[Argument[Any]], authors : List[String] = DEFAULT_AUTHOR, legal : List[String] = DEFAULT_LEGAL, manualExtras : String = "", markdownManualExtras : String = "") {
     def getCommandString : String = command;
@@ -107,7 +178,42 @@ List(
     //}
     
     //private 
-    
+    def open(){
+      this.get[Option[String]]("createRunningFile") match {
+        case Some(f) => {
+            fileUtils.createDummyFile(f=f,
+                      message  = "# Note: if this file EXISTS, then either a job is currently running, or else the job crashed.",
+                      existsWarn= "Warning: Run File Already Exists! Is this a rerun?");
+        }
+        case None => {
+          //do nothing
+        }
+      }
+    }
+    def close(){
+      this.get[Option[String]]("successfulCompletionFile") match {
+        case Some(f) => {
+            fileUtils.createDummyFile(f=f,
+                      message  = "# Note: if this file EXISTS, then the job completed without fatal errors.",
+                      existsWarn= "Warning: Completion File Already Exists! Is this a rerun?");
+        }
+        case None => {
+          //do nothing
+        }
+      }
+      this.get[Option[String]]("createRunningFile") match {
+        case Some(f) => {
+            val file = new java.io.File(f);
+            if(! file.exists()) warning("WARNING WARNING WARNING: RUNNING FILE NO LONGER EXISTS!!! Multiple concurrent runs using the same run file?","FileDoesNotExist",-1);
+            else {
+              file.delete();
+            }
+        }
+        case None => {
+          //do nothing
+        }
+      }
+    }
     
     private def filterOutFinalArgs[T](arg : Argument[T]) : Boolean = {
       arg match {
@@ -160,6 +266,7 @@ List(
         false;
       } else {
         parseArgs_master(args.toList, debugMode);
+        this.open();
         true;
       }
       } catch {
@@ -586,50 +693,5 @@ List(
   }
   
   
-  abstract class StringParser[T]{
-    def parse(s : String) : T;
-    def argType : String;
-    def unsetValue : T;
-  }
-  implicit object stringStringParser extends StringParser[String]{
-    def parse(s : String) : String = s;
-    def argType : String = "String";
-    def unsetValue : String = "";
-  }
-  implicit object intStringParser extends StringParser[Int]{
-    def parse(s : String) : Int = string2int(s);
-    def argType : String = "Int";
-    def unsetValue : Int = -1;
-  }
-  implicit object doubleStringParser extends StringParser[Double]{
-    def parse(s : String) : Double = string2double(s);
-    def argType : String = "Double";
-    def unsetValue : Double = -1;
-  }
-  implicit object floatStringParser extends StringParser[Float]{
-    def parse(s : String) : Float = string2float(s);
-    def argType : String = "Float";
-    def unsetValue : Float = -1;
-  }
-  implicit object commaListStringParser extends StringParser[List[String]]{
-    def parse(s : String) : List[String] = s.split(",").toList;
-    def argType : String = "CommaDelimitedListOfStrings";
-    def unsetValue : List[String] = List();
-  }
-  implicit object commaListDoubleParser extends StringParser[List[Double]]{
-    def parse(s : String) : List[Double] = s.split(",").map(string2double(_)).toList;
-    def argType : String = "CommaDelimitedListOfDoubles";
-    def unsetValue : List[Double] = List();
-  }
-  implicit object commaListIntParser extends StringParser[List[Int]]{
-    def parse(s : String) : List[Int] = s.split(",").map(string2int(_)).toList;
-    def argType : String = "CommaDelimitedListOfDoubles";
-    def unsetValue : List[Int] = List();
-  }
-  implicit object commaListFloatParser extends StringParser[List[Float]]{
-    def parse(s : String) : List[Float] = s.split(",").map(string2float(_)).toList;
-    def argType : String = "CommaDelimitedListOfDoubles";
-    def unsetValue : List[Float] = List();
-  }
   
 }
