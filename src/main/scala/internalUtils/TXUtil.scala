@@ -559,12 +559,12 @@ case class TXUtil(geneID : String, txID : String, chrom : String, strand : Char,
         val lastUnchangedIdx = Range(0,cLen).find{ i => { val g = convertCtoG(i).get; (strand == '+' && g >= gPos) || (strand == '-' && g < gPos) }}.getOrElse(-3) / 3
         //if( strand == '+') return ("p.?[snvPossBreakSJDonor"+(lastUnchangedIdx+1)+"]",vType+"_PLOF_splice-3_PossibleSplice3Loss");
         //else               return ("p.?[snvPossBreakSJAccpt"+(lastUnchangedIdx+1)+"]",vType+"_PLOF_splice-5_PossibleSplice5Loss");
-        if( strand == '+')  return pVarInfo("p.?[snvPossBreakSJDonor"+(lastUnchangedIdx+1)+"]",lastUnchangedIdx,lastUnchangedIdx,"",vType,"PLOF","splice-3","PossibleSplice3Loss");
-        else                return pVarInfo("p.?[snvPossBreakSJDonor"+(lastUnchangedIdx+1)+"]",lastUnchangedIdx,lastUnchangedIdx,"",vType,"PLOF","splice-5","PossibleSplice5Loss");
+        if( strand == '+')  return pVarInfo("p.?[snvPossBreakSJDonor"+(lastUnchangedIdx+1)+"]",lastUnchangedIdx,lastUnchangedIdx,"",vType,"PLOF","splice-3","possSplice");
+        else                return pVarInfo("p.?[snvPossBreakSJDonor"+(lastUnchangedIdx+1)+"]",lastUnchangedIdx,lastUnchangedIdx,"",vType,"PLOF","splice-5","possSplice");
       } else if(cPosOpt.isEmpty && gSpans.exists{case (s,e) => { gPos >= e && gPos - spliceRegionBuffer < e }}){
         val lastUnchangedIdx = Range(0,cLen).find{ i => { val g = convertCtoG(i).get; (strand == '+' && g >= gPos) || (strand == '-' && g < gPos) }}.getOrElse(-3) / 3
-        if( strand == '-')  return pVarInfo("p.?[snvPossBreakSJDonor"+(lastUnchangedIdx+1)+"]",lastUnchangedIdx,lastUnchangedIdx,"",vType,"PLOF","splice-3","PossibleSplice3Loss");
-        else                return pVarInfo("p.?[snvPossBreakSJDonor"+(lastUnchangedIdx+1)+"]",lastUnchangedIdx,lastUnchangedIdx,"",vType,"PLOF","splice-5","PossibleSplice5Loss");
+        if( strand == '-')  return pVarInfo("p.?[snvPossBreakSJDonor"+(lastUnchangedIdx+1)+"]",lastUnchangedIdx,lastUnchangedIdx,"",vType,"PLOF","splice-3","possSplice");
+        else                return pVarInfo("p.?[snvPossBreakSJDonor"+(lastUnchangedIdx+1)+"]",lastUnchangedIdx,lastUnchangedIdx,"",vType,"PLOF","splice-5","possSplice");
         
       } else if(cPosOpt.isEmpty && gIntronSpans.exists{case (s,e) => { gPos < e && gPos >= s }}){
         val lastUnchangedIdx = Range(0,cLen).find{ i => { val g = convertCtoG(i).get; (strand == '+' && g >= gPos) || (strand == '-' && g < gPos) }}.getOrElse(-3) / 3;
@@ -1247,7 +1247,7 @@ object TXUtil {
     x.map(_.mkString(delims(1))).mkString(delims(0));
   }
   def mkSubDelimList(x : Seq[Seq[String]], delims : Seq[String]) : java.util.List[String] = {
-    x.map(_.mkString(delims(1))).toList;
+    x.map(_.padTo(1,".").mkString(delims(1))).toList;
   }
   
   def getMutString(ref : String, alt : String, pos : Int, 

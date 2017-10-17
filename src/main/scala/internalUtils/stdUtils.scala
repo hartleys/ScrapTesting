@@ -40,6 +40,20 @@ object stdUtils {
       def hasNext = iter.hasNext;
     }
   }
+  def addIteratorCloseAction[A](iter : Iterator[A], closeAction : ((A) => Unit)) : Iterator[A] = {
+    new Iterator[A] {
+      //var isOpen = true;
+      def next = {
+        val out = iter.next;
+        if(! iter.hasNext){
+          closeAction(out);
+        }
+        out
+      }
+      def hasNext = iter.hasNext;
+    }
+  }
+  
   
   def addQuotesIfNeeded(s : String) : String = {
     if(s.head == '\"' && s.last == '\"'){
@@ -48,6 +62,7 @@ object stdUtils {
       return "\"" + s + "\"";
     }
   }
+  
   
   def trimBrackets(s : String) : String = {
     var out = s;
@@ -224,9 +239,13 @@ object stdUtils {
   def getDateAndTimeString : String = {
     return STANDARD_DATE_AND_TIME_FORMATTER.format(java.util.Calendar.getInstance().getTime());
   }
-   
+   //TimeStampUtil.timeDifferenceFormatter(time)
   object TimeStampUtil {
     def apply() : TimeStampUtil = new TimeStampUtil(java.util.Calendar.getInstance.getTimeInMillis());
+    
+    def timeDifferenceFormatterNanos(time : Long) : String = {
+      timeDifferenceFormatter(time / 1000000);
+    }
     
     def timeDifferenceFormatter(time : Long) : String = {
       val millis_col = zeroPad( (time % 1000).toInt , 4);
@@ -312,6 +331,25 @@ object stdUtils {
   def skipWhile[A](iter : BufferedIterator[A])(f : (A => Boolean)){
     while(iter.hasNext && f(iter.head)){
       iter.next;
+    }
+  }
+  
+  def flattenIterators[A](ii : Iterator[Iterator[A]]) : Iterator[A] = {
+    val iif = ii.filter(i => i.hasNext);
+    if(! iif.hasNext){
+      return Iterator[A]();
+    } else {
+      var currIter = iif.next;
+      return new Iterator[A]{
+        def hasNext : Boolean = currIter.hasNext
+        def next : A = {
+          val next = currIter.next;
+          if((! currIter.hasNext) && iif.hasNext){
+            currIter = iif.next;
+          }
+          next;
+        }
+      }
     }
   }
   
@@ -590,6 +628,15 @@ object stdUtils {
   
   abstract class AdvancedIteratorProgressReporter[A] {
     def reportProgress(iterCt : Int, a : A);
+    
+    def reportStart(iterCt : Int, a : A) = {
+      //reportProgress(iterCt,a);
+      //default: do nothing!
+    }
+    def reportEnd(iterCt : Int, a : A) = {
+      //reportProgress(iterCt,a);
+      //default: do nothing!
+    }
   }
   case class AdvancedIteratorProgressReporter_ThreeLevel[A](elementTitle : String, 
                                                             dotThreshold : Int, 
@@ -747,13 +794,55 @@ object stdUtils {
         }
       }
     }
+    var initTime = System.nanoTime();
+    override def reportStart(iterCt : Int, a : A){
+      progressReport("[STARTING ITERATION:] [Time: "+getDateAndTimeString+"]"+reportFunction(a,iterCt));
+      val currTime = System.nanoTime();
+      lastLineTime = currTime;
+      initTime = currTime;
+    }
+    override def reportEnd(iterCt : Int, a : A){
+      val currTime = System.nanoTime();
+      val elapsedMillis = (currTime - initTime) / 1000000;
+      val elapsedString = TimeStampUtil.timeDifferenceFormatterNanos(currTime - initTime);
+      val linesPerSec   = (iterCt.toDouble) / (elapsedMillis.toDouble / 1000.toDouble);
+      
+      val speedString = if(linesPerSec < 10){
+              val linesPerMin = (iterCt * 60).toDouble / (elapsedMillis.toDouble / 1000.toDouble);
+              ((math.rint(linesPerMin * 100)) / 100) +" "+elementTitle+ " per min";
+      } else if(linesPerSec < 1000){
+              ((math.rint(linesPerSec * 100)) / 100) +" "+elementTitle+ " per sec";
+      } else {
+              math.round(linesPerSec) +" "+elementTitle+ " per sec";
+      }
+      progressReport("[FINISHED ITERATION: "+iterCt+" "+elementTitle+" processed] [Time: "+getDateAndTimeString+"] (Elapsed: "+elapsedString+"; "+speedString+")"+reportFunction(a,iterCt));
+    }
   }
   
-  def wrapIteratorWithAdvancedProgressReporter[B]( iter : Iterator[B] , ipr : AdvancedIteratorProgressReporter[B] ) : Iterator[B] = {
+  def wrapIteratorWithAdvancedProgressReporter2[B]( iter : Iterator[B] , ipr : AdvancedIteratorProgressReporter[B] ) : Iterator[B] = {
     iter.zip(Iterator.from(1)).map{case (b,i) => {
       ipr.reportProgress(i,b);
       b;
     }}
+  }
+  
+  def wrapIteratorWithAdvancedProgressReporter[B]( iter : Iterator[B] , ipr : AdvancedIteratorProgressReporter[B] ) : Iterator[B] = {
+    //iter.zip(Iterator.from(1)).map{case (b,i) => {
+    //  ipr.reportProgress(i,b);
+    //  b;
+    //}}
+    new Iterator[B]{
+      var i = 1;
+      def hasNext : Boolean = iter.hasNext;
+      def next : B = {
+        val n = iter.next;
+        if(i == 1) ipr.reportStart(i,n);
+        ipr.reportProgress(i,n);
+        if(! hasNext) ipr.reportEnd(i,n);
+        i = i + 1;
+        n;
+      }
+    }
   }
   
   

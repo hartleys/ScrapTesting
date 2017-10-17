@@ -37,7 +37,7 @@ object CalcACMGVar {
      val parser : CommandLineArgParser = 
        new CommandLineArgParser(
           command = "CmdAssessACMG", 
-          quickSynopsis = "", 
+          quickSynopsis = "",  
           synopsis = "", 
           description = "BETA: This function consolidates information from a wide variety of different input files and attempts to calculate a "+
                         "subset of the ACMG guidelines criteria. It then attempts to assign pathogenicity scores. " + BETA_WARNING,   
@@ -86,6 +86,12 @@ object CalcACMGVar {
                                          argDesc =  "This file must contain at least four columns (labelled in a header line): chrom, start, end, and domainID."
                                         ) :: 
                     new BinaryOptionArgument[String](
+                                         name = "pseudoGeneGTF", 
+                                         arg = List("--pseudoGeneGTF"), 
+                                         valueName = "pseudoGeneGTF.gtf.gz",  
+                                         argDesc =  "Simple GTF file containing a list of pseudogenes."
+                                        ) :: 
+                    new BinaryOptionArgument[String](
                                          name = "inSilicoKeys", 
                                          arg = List("--inSilicoKeys"), 
                                          valueName = "dbNSFP_MetaSVM_pred:D:T",
@@ -93,14 +99,25 @@ object CalcACMGVar {
                                                     "The first part is the INFO key referring to the stored results of an in silico prediction algorithm. The 2nd is a \"|\"-delimited list "+
                                                     "of the values that should be interpreted as \"predicted damaging\", and the third is a \"|\"-delimited list of the values that should be interpreted as \"predicted benign\""
                                         ) :: 
+                    new BinaryArgument[String](
+                                         name = "inSilicoMergeMethod", 
+                                         arg = List("--inSilicoMergeMethod"), 
+                                         valueName = "smart",
+                                         argDesc =  "",
+                                         defaultValue = Some("smart")
+                                        ) :: 
                     new BinaryOptionArgument[String](
                                          name = "conservedElementFile", 
                                          arg = List("--conservedElementFile"), 
                                          valueName = "conservedElementFile.txt",  
                                          argDesc =  "This file contains the spans for the conserved element regions found by GERP. This file must contain 3 columns (no header line): chrom, start end."
                                         ) :: 
-                                        
-                                        
+                    new BinaryOptionArgument[String](
+                                         name = "lowMapBed", 
+                                         arg = List("--lowMapBed"), 
+                                         valueName = "lowMapBed.bed.gz",  
+                                         argDesc =  "This file contains all spans with mappability less than 1."
+                                        ) :: 
                     new BinaryArgument[List[String]](name = "ctrlAlleFreqKeys",
                                            arg = List("--ctrlAlleFreqKeys"),  
                                            valueName = "key1,key2,...", 
@@ -124,6 +141,12 @@ object CalcACMGVar {
                                          arg = List("--groupFile"), 
                                          valueName = "groups.txt",  
                                          argDesc =  "File containing a group decoder. This is a simple 2-column file (no header line). The first column is the sample ID, the 2nd column is the group ID."
+                                        ) ::  
+                    new BinaryOptionArgument[String](
+                                         name = "hgmdVarVcf", 
+                                         arg = List("--hgmdVarVcf"), 
+                                         valueName = "HGMD.vcf.gz",  
+                                         argDesc =  "File containing HGMD variants."
                                         ) :: 
                     new BinaryOptionArgument[String](
                                          name = "superGroupList", 
@@ -171,7 +194,11 @@ object CalcACMGVar {
                    PM2_AF = parser.get[Double]("PM2_AF"),
                    rmskFile = parser.get[Option[String]]("rmskFile"),
                    refSeqFile = parser.get[Option[String]]("canonicalTxFile"),
-                   inSilicoParams = parser.get[Option[String]]("inSilicoKeys")
+                   inSilicoParams = parser.get[Option[String]]("inSilicoKeys"),
+                   inSilicoMergeMethod = parser.get[String]("inSilicoMergeMethod"),
+                   hgmdVarVcf = parser.get[Option[String]]("hgmdVarVcf"),
+                   lowMapBed = parser.get[Option[String]]("lowMapBed"),
+                   pseudoGeneGTF = parser.get[Option[String]]("pseudoGeneGTF")
                    //dropKeys = parser.get[Option[List[String]]]("dropKeys"),
                    ).chain(CalcACMGVar.SummaryACMGWalker(
                              groupFile = parser.get[Option[String]]("groupFile"),
@@ -450,7 +477,8 @@ object CalcACMGVar {
       return attr.map(a => a.toString()).toSeq;
     }
   }
-  
+  type StringToBool = (String => Boolean)
+
   case class AssessACMGWalker(
                  chromList : Option[List[String]],
                  clinVarVcf : String,
@@ -464,13 +492,19 @@ object CalcACMGVar {
                  rmskFile : Option[String],
                  refSeqFile : Option[String],
                  inSilicoParams : Option[String] = None,
-                 inSilicoMinCt : Option[Int] = None//,
+                 inSilicoMergeMethod : String = "smart",
+                 inSilicoMinCt : Option[Int] = None,
+                 hgmdVarVcf : Option[String] = None,
+                 lowMapBed : Option[String] = None,
+                 pseudoGeneGTF : Option[String] = None
                  //domainSummaryFile : Option[String] = None
                 ) extends internalUtils.VcfTool.VCFWalker {
     
     reportln("Creating AssessACMGWalker() ["+stdUtils.getDateAndTimeString+"]","note")
     
-    val inSilicoKeysOpt : Option[Seq[(String,Set[String],Set[String])]] = inSilicoParams match {
+    
+    
+    /*val inSilicoKeysOpt : Option[Seq[(String,Set[String],Set[String])]] = inSilicoParams match {
       case Some(isk) => {
         Some(isk.split(",").toSeq.map(s => {
           val cells = s.split(":");
@@ -481,12 +515,64 @@ object CalcACMGVar {
         }))
       }
       case None => None;
+    }*/
+    val inSilicoFuns : Seq[(String, StringToBool,StringToBool)] = inSilicoParams match {
+      case Some(isk) => {
+        isk.split(",").toSeq.map(iskString => {
+          val cells = iskString.split(":");
+         // if(cells.length <= 2){
+         //   error("Malformed input parameter: each comma-delimited element in inSilicoKeys must have 3 or more colon-delimited parts!");
+         // }
+          if(cells.length != 4){
+              error("Malformed input parameter: each comma-delimited element in inSilicoKeys must have 4 colon-delimited parts!");
+          }
+          if(cells(1) == "eq"){
+            val damKeys = cells(2).split("\\|").toSet;
+            val benKeys = cells(3).split("\\|").toSet;
+            (cells(0), ((s : String) => {damKeys.contains(s)}), ((s : String) => {benKeys.contains(s)}))
+          } else if(cells(1) == "ge"){
+            val damThresh = string2double(cells(2))
+            val benThresh = string2double(cells(3))
+            (cells(0), ((s : String) => {s != "." && string2double(s) >= damThresh}), ((s : String) => {s != "." && string2double(s) <= benThresh}))
+          } else if(cells(1) == "le"){
+            val damThresh = string2double(cells(2))
+            val benThresh = string2double(cells(3))
+            (cells(0), ((s : String) => {s != "." && string2double(s) <= damThresh}), ((s : String) => {s != "." && string2double(s) >= benThresh}))
+          } else {
+            error("UNKNOWN INSILICO FUNCTION PARAM: \""+cells(1)+"\"! Options are: in, eq, ge, le.");
+            null;
+          }
+        })
+      }
+      case None => Seq();
     }
-
-    val inSilicoMin = if(inSilicoMinCt.isEmpty){
-      if(inSilicoKeysOpt.isEmpty) 0;
-      else inSilicoKeysOpt.get.size();
-    } else inSilicoMinCt.get;
+    val inSilicoSummary : (VariantContext) => (String,Seq[String]) = if(inSilicoFuns.length > 0){
+      (vc : VariantContext) => {
+        val statusSeq : Seq[(Boolean,Boolean,String)] = inSilicoFuns.map{ case (tag,damFun,benFun) => {  
+          val attr = vc.getAttributeAsList(tag).toList.map{_.toString()}.filter(_ != ".");
+          val (d,b) = (attr.exists(p => damFun(p)), attr.exists(p => benFun(p)));
+          val s = if(d && !b) "Damaging";
+          else if(b && !d) "Benign";
+          else if(b && d) "Ambiguous";
+          else "Unknown";
+          (d,b,s);
+        }};
+        val anyDam = statusSeq.exists{ case (damBool,benBool,s) => damBool};
+        val anyBen = statusSeq.exists{ case (damBool,benBool,s) => benBool};
+        val status = if(anyDam && (! anyBen)){
+          "Damaging"
+        } else if(anyBen && (! anyDam)){
+          "Benign"
+        } else if(anyBen && anyDam){
+          "Ambiguous"
+        } else {
+          "Unknown"
+        }
+        (status,statusSeq.map{_._3});
+      }
+    } else {
+      (vc : VariantContext) => (".",Seq());
+    }
     
     reportln("Reading txToGene map... ["+stdUtils.getDateAndTimeString+"]","debug");
     val txToGene : (String => String) = txToGeneFile match {
@@ -538,44 +624,6 @@ object CalcACMGVar {
         })
       }
     }
-    /*
-    val isRefSeq : (String => Boolean) = refSeqFile match {
-      case Some(f) => {
-        val lines = getLinesSmartUnzip(f);
-        val rawHeaderLine = lines.next();
-        val headerCells = if(rawHeaderLine.charAt(0) == '#'){
-          rawHeaderLine.tail.split("\t");
-        } else {
-          rawHeaderLine.split("\t");
-        }
-        if((! headerCells.contains("name")) || (! headerCells.contains("isRefSeq"))){
-          error("FATAL INPUT ERROR: refSeqFile must have at least 2 labelled columns: name and isRefSeq.");
-        }
-        val nameCol = headerCells.indexOf("name");
-        val irsCol = headerCells.indexOf("isRefSeq");
-        
-        var refSeqSet = Set[String]();
-        
-        while(lines.hasNext){
-          val cells = lines.next().split("\t");
-          if(cells(irsCol) == "1"){
-            refSeqSet = refSeqSet + cells(nameCol);
-          }
-        }
-        
-        reportln("   found: "+refSeqSet.size+" RefSeq transcripts.","debug");
-        
-        ((s : String) => {
-          refSeqSet.contains(s);
-        })
-      }
-      case None => {
-        ((s : String) => {
-          false;
-        })
-      }
-    }*/
-    
     
 //getClinVarVariants(infile : String, chromList : Option[List[String]], vcfCodes : VCFAnnoCodes = VCFAnnoCodes()) : scala.collection.Map[String,Set[(String,internalUtils.TXUtil.pVariantInfo)]]
     /****************************************
@@ -668,6 +716,72 @@ object CalcACMGVar {
       }
     }
     
+    val pseudogeneArray = pseudoGeneGTF match {
+      case Some(f) => {
+        reportln("reading pseudogene locus file ["+stdUtils.getDateAndTimeString+"]","debug");
+        val arr : genomicAnnoUtils.GenomicArrayOfSets[String] = genomicAnnoUtils.GenomicArrayOfSets[String](false);
+        val lines = getLinesSmartUnzip(f);
+        
+        lines.dropWhile(line => line.startsWith("#")).foreach(line => {
+          val cells = line.split("\t");
+          val (chrom,start,end) = (cells(0),string2int(cells(3)) - 1,string2int(cells(4)))
+          arr.addSpan(commonSeqUtils.GenomicInterval(chrom, '.', start,end), "CE");
+        })
+        arr.finalizeStepVectors;
+        reportln("done with conserved locus file ["+stdUtils.getDateAndTimeString+"]","debug");
+        Some(arr);
+      }
+      case None => {
+        None;
+      }
+    }
+    val locusIsPseudogene : Option[(commonSeqUtils.GenomicInterval => Boolean)] = pseudogeneArray match {
+      case Some(arr) => {
+        Some(
+               (iv : commonSeqUtils.GenomicInterval) => {
+                 ! arr.findIntersectingSteps(iv).foldLeft(Set[String]()){case (soFar,(iv,currSet)) => {
+                   soFar ++ currSet;
+                 }}.isEmpty
+               }
+            );
+      }
+      case None => {
+        None
+      }
+    }
+    
+    val lowMapArray = lowMapBed match {
+      case Some(f) => {
+        reportln("reading mappability locus file ["+stdUtils.getDateAndTimeString+"]","debug");
+        val arr : genomicAnnoUtils.GenomicArrayOfSets[String] = genomicAnnoUtils.GenomicArrayOfSets[String](false);
+        val lines = getLinesSmartUnzip(f);
+        
+        lines.foreach(line => {
+          val cells = line.split("\t");
+          val (chrom,start,end) = (cells(0),string2int(cells(1)),string2int(cells(2)))
+          arr.addSpan(commonSeqUtils.GenomicInterval(chrom, '.', start,end), "CE");
+        })
+        arr.finalizeStepVectors;
+        reportln("done with conserved locus file ["+stdUtils.getDateAndTimeString+"]","debug");
+        Some(arr);
+      }
+      case None => {
+        None;
+      }
+    }
+    val locusIsMappable : Option[(commonSeqUtils.GenomicInterval => Boolean)] = lowMapArray match {
+      case Some(arr) => {
+        Some((iv : commonSeqUtils.GenomicInterval) => {
+          arr.findIntersectingSteps(iv).foldLeft(Set[String]()){case (soFar,(iv,currSet)) => {
+            soFar ++ currSet;
+          }}.isEmpty
+        })
+      }
+      case None => {
+        None
+      }
+    }
+    
     val locusArray = domainFile match {
       case Some(f) => {
         reportln("reading domain locus file ["+stdUtils.getDateAndTimeString+"]","debug");
@@ -740,7 +854,7 @@ object CalcACMGVar {
     val locusIsRepetitive : (commonSeqUtils.GenomicInterval => Boolean) = repLocusArray match {
       case Some(arr) => {
         ((iv : commonSeqUtils.GenomicInterval) => {
-          arr.findIntersectingSteps(iv).foldLeft(Set[String]()){case (soFar,(iv,currSet)) => { soFar ++ currSet }}.isEmpty;
+          ! arr.findIntersectingSteps(iv).foldLeft(Set[String]()){case (soFar,(iv,currSet)) => { soFar ++ currSet }}.isEmpty;
         })
       }
       case None => {
@@ -762,9 +876,52 @@ object CalcACMGVar {
       
     }*/
     
+      val (clinVarVariantSet,clinVarVariants) : (scala.collection.Map[String,(String,Int,String)],scala.collection.Map[String,Set[internalUtils.TXUtil.pVariantInfo]]) = getFullClinVarVariants(infile=clinVarVcf,chromList =chromList, vcfCodes = vcfCodes, hgmdVarVcf = hgmdVarVcf);
+      
+      val clinVarVariants_StopLoss_Patho = clinVarVariants.map{ case (tx,varSet) => {
+        ((tx,varSet.flatMap{case pvar => {
+          if( pvar.CLNSIG != 4 && pvar.CLNSIG != 5){
+            None;
+          } else if(pvar.pType == "STOP-LOSS") {
+            Some(pvar);
+          } else {
+            None;
+          }
+        }}))
+      }}
+      val clinVarVariants_StopLoss_Benign = clinVarVariants.map{ case (tx,varSet) => {
+        ((tx,varSet.flatMap{case pvar => {
+          if( pvar.CLNSIG != 3 && pvar.CLNSIG != 2 ){
+            None;
+          } else if(pvar.pType == "STOP-LOSS") {
+            Some(pvar);
+          } else {
+            None;
+          }
+        }}))
+      }}
+      
+      val clinVarVariants_LOFSet = clinVarVariants.map{ case (tx,varSet) => {
+        (tx,varSet.filter{ v => {
+          v.severityType == "LLOF"  // && (v.CLNSIG == 4 || v.CLNSIG == 5)
+        }})
+      }}
+      val clinVarVariants_startLoss = clinVarVariants.map{ case (tx,varSet) => {
+        (tx,varSet.filter{ v => {
+          v.pType == "START-LOSS"  // && (v.CLNSIG == 4 || v.CLNSIG == 5)
+        }})
+      }}
+      val clinVarVariants_stopLoss = clinVarVariants.map{ case (tx,varSet) => {
+        (tx,varSet.filter{ v => {
+          v.pType == "STOP-LOSS"  // && (v.CLNSIG == 4 || v.CLNSIG == 5)
+        }})
+      }}
+      
+      
+    
     def walkVCF(vcIter : Iterator[VariantContext], vcfHeader : VCFHeader, verbose : Boolean = true) : (Iterator[VariantContext],VCFHeader) = {
       //val (clinVarVariantSet,clinVarVariants) : (scala.collection.Map[String,String],scala.collection.Map[String,Set[(String,internalUtils.TXUtil.pVariantInfo,String)]]) = getClinVarVariants(infile=clinVarVcf,chromList =chromList, vcfCodes = vcfCodes);
-      val (clinVarVariantSet,clinVarVariants) : (scala.collection.Map[String,(String,Int,String)],scala.collection.Map[String,Set[internalUtils.TXUtil.pVariantInfo]]) = getFullClinVarVariants(infile=clinVarVcf,chromList =chromList, vcfCodes = vcfCodes);
+
       
       //if(domainSummaryFile.isDefined){
         
@@ -774,6 +931,8 @@ object CalcACMGVar {
             new VCFInfoHeaderLine(vcfCodes.assess_IsRepetitive, 1, VCFHeaderLineType.Integer,    "Indicates whether the variant intersects with a repetitive region, as defined by repeatmasker (derived from rmsk.txt, downloaded from ucsc, APR 2017)"),
             new VCFInfoHeaderLine(vcfCodes.assess_IsConserved, 1, VCFHeaderLineType.Integer,    "Indicates whether the variant intersects with a disproportionately-conserved region (as defined by GERPplusplus)."),
             new VCFInfoHeaderLine(vcfCodes.assess_IsHotspot, 1, VCFHeaderLineType.Integer,    "Indicates whether the variant intersects with a known domain."),
+            new VCFInfoHeaderLine(vcfCodes.assess_IsMappable, 1, VCFHeaderLineType.Integer,    "Indicates whether the variant intersects with a low-mappability region (mappability less than 1 in the UCSC wgEncodeCrgMapabilityAlign100mer.bw database file)"),
+
             //new VCFInfoHeaderLine(vcfCodes.assess_domain, 1, VCFHeaderLineType.Integer,    ""),
             //new VCFInfoHeaderLine(vcfCodes.assess_criteria, 1, VCFHeaderLineType.Integer,    ""),
             //new VCFInfoHeaderLine(vcfCodes.assess_GeneSenseLOF, 1, VCFHeaderLineType.Integer,    ""),
@@ -826,9 +985,6 @@ object CalcACMGVar {
             new VCFInfoHeaderLine(vcfCodes.assess_BP7_CANON, 1, VCFHeaderLineType.Integer,      "(Considering the canonical TX only) Synonymous variant that does NOT intersect with a conserved element region."),
             new VCFInfoHeaderLine(vcfCodes.assess_RATING_CANON, 1, VCFHeaderLineType.String,    "(Considering the canonical TX only) ACMG Pathogenicity rating: PATHO - pathogenic. LPATH - likely pathogenic, VUS - variant, unknown significance, LB - likely benign, B - benign."),
 
-
-
-
             //new VCFInfoHeaderLine(vcfCodes.geneIDs, VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.String,    "List of gene symbols that this variant overlaps with."),
         
             new VCFInfoHeaderLine(vcfCodes.assess_exactMatchInfo, 1, VCFHeaderLineType.String,   "RS number and clinical significance level referring to any ClinVar variant that matches this variant exactly (or blank if there is no matching variant). Clinical significance levels are summarized across all reports. If a variant is reported as both likely benign and benign, it will be marked benign, and likewise with pathogenic. If a variant is marked both pathogenic or likely pathogenic and benign or likely benign, it is marked uncertain. 0 - Uncertain significance, 1 - not provided, 2 - Benign, 3 - Likely benign, 4 - Likely pathogenic, 5 - Pathogenic, 6 - drug response, 7 - histocompatibility, 255 - other"),
@@ -842,21 +998,33 @@ object CalcACMGVar {
             new VCFInfoHeaderLine(vcfCodes.assess_pathoAminoMatchRS_CANON, VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.String,   "(Considering the canonical TX only) List of RS numbers referring to pathogenic ClinVar variant(s) that match the amino acid change of this variant  (or blank if there is no matching variant)."),
             new VCFInfoHeaderLine(vcfCodes.assess_pathoNearMatchRS_CANON,  VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.String,   "(Considering the canonical TX only) List of RS numbers referring to pathogenic ClinVar variant(s) that alter the same amino acid position, but change to a different amino acid  (or blank if there is no matching variant)."),
             new VCFInfoHeaderLine(vcfCodes.assess_aminoMatchInfo_CANON, VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.String,   "(Considering the canonical TX only) List of RS numbers and clinical significance level referring to any ClinVar variant(s) that match the amino acid change of this variant  (or blank if there is no matching variant). See "+vcfCodes.assess_exactMatchInfo+" for more info on how the clnsig rating is calculated."),
-            new VCFInfoHeaderLine(vcfCodes.assess_nearMatchInfo_CANON,  VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.String,   "(Considering the canonical TX only) List of RS numbers and clinical significance level referring to any ClinVar variant(s) that alter the same amino acid position, but change to a different amino acid  (or blank if there is no matching variant). See "+vcfCodes.assess_exactMatchInfo+" for more info on how the clnsig rating is calculated.")
-
-
+            new VCFInfoHeaderLine(vcfCodes.assess_nearMatchInfo_CANON,  VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.String,   "(Considering the canonical TX only) List of RS numbers and clinical significance level referring to any ClinVar variant(s) that alter the same amino acid position, but change to a different amino acid  (or blank if there is no matching variant). See "+vcfCodes.assess_exactMatchInfo+" for more info on how the clnsig rating is calculated."),
+            
+            new VCFInfoHeaderLine(vcfCodes.assess_forBT_codonLOF, VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.String,   "For LOF variants: List of RS numbers for previously-reported pathogenic or likely-pathogenic LOF variants that occur in the same codon as this LOF variant."),
+            new VCFInfoHeaderLine(vcfCodes.assess_forBT_downstreamLOF, VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.String,   "For LOF variants: List of RS numbers for previously-reported pathogenic or likely-pathogenic LOF variants that occur DOWNSTREAM of this LOF variant."),
+            new VCFInfoHeaderLine(vcfCodes.assess_forBT_codonLOF_CANON, VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.String,   "(Considering the canonical TX only) For LOF variants: List of RS numbers for previously-reported pathogenic or likely-pathogenic LOF variants that occur in the same codon as this LOF variant."),
+            new VCFInfoHeaderLine(vcfCodes.assess_forBT_downstreamLOF_CANON, VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.String,   "(Considering the canonical TX only) For LOF variants: List of RS numbers for previously-reported pathogenic or likely-pathogenic LOF variants that occur DOWNSTREAM of this LOF variant."),
+  
+            new VCFInfoHeaderLine(vcfCodes.assess_forBT_geneHasDownstreamLOF, VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.String,   "For each gene that this variant intersects with, this will include the geneID if and only if there is a known-pathogenic or likely-pathogenic nonsense (stop gain) or frameshift variant in ClinVar/HGMD"),
+            new VCFInfoHeaderLine(vcfCodes.assess_forBT_geneHasStartLoss, VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.String,   "For each gene that this variant intersects with, this will include the geneID if and only if there is a known-pathogenic or likely-pathogenic start-loss variant in ClinVar/HGMD."),
+            new VCFInfoHeaderLine(vcfCodes.assess_forBT_geneHasStopLoss, VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.String,   "For each gene that this variant intersects with, this will include the geneID if and only if there is a known-pathogenic or likely-pathogenic stop-loss variant in ClinVar/HGMD."),
+            new VCFInfoHeaderLine(vcfCodes.assess_forBT_geneHasDownstreamLOF_CANON, VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.String,   "(Considering the canonical TX only) For each gene that this variant intersects with, this will include the geneID if and only if there is a known-pathogenic or likely-pathogenic nonsense (stop gain) or frameshift variant in ClinVar/HGMD"),
+            new VCFInfoHeaderLine(vcfCodes.assess_forBT_geneHasStartLoss_CANON, VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.String,   "(Considering the canonical TX only) For each gene that this variant intersects with, this will include the geneID if and only if there is a known-pathogenic or likely-pathogenic start-loss variant in ClinVar/HGMD."),
+            new VCFInfoHeaderLine(vcfCodes.assess_forBT_geneHasStopLoss_CANON, VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.String,   "(Considering the canonical TX only) For each gene that this variant intersects with, this will include the geneID if and only if there is a known-pathogenic or likely-pathogenic stop-loss variant in ClinVar/HGMD.")
             
           ) ++ (
-            if(inSilicoKeysOpt.isDefined){
+            if(inSilicoFuns.length > 0){
               List[VCFInfoHeaderLine](
-                new VCFInfoHeaderLine(vcfCodes.assess_inSilicoSummary,  VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.String,   "For each of the following in silico algorithms: ("+inSilicoKeysOpt.get.map(_._1).mkString(",")+") the final determination of whether it was considered \"Damaging\", \"Benign\", or neither (\".\")"),
-                new VCFInfoHeaderLine(vcfCodes.assess_PP3, 1, VCFHeaderLineType.Integer,      "Predicted to be damaging by at least "+inSilicoMin+" of the following in silico prediction algorithms: "+inSilicoKeysOpt.get.map(_._1).mkString(",")),
-                new VCFInfoHeaderLine(vcfCodes.assess_BP4, 1, VCFHeaderLineType.Integer,      "Predicted to be benign by at least "+inSilicoMin+" of the following in silico prediction algorithms: "+inSilicoKeysOpt.get.map(_._1).mkString(","))
-              )
+                new VCFInfoHeaderLine(vcfCodes.assess_inSilicoSummary,  1, VCFHeaderLineType.String,   "For each of the following in silico algorithms: ("+inSilicoFuns.map(_._1).mkString(",")+") the final determination of whether it was considered \"Damaging\", \"Benign\", \"Ambiguous\" or \"Unknown\"."),
+                new VCFInfoHeaderLine(vcfCodes.assess_PP3, 1, VCFHeaderLineType.Integer,      "Predicted to be damaging by at least 1 of the following in silico prediction algorithms: "+inSilicoFuns.map(_._1).mkString(",")),
+                new VCFInfoHeaderLine(vcfCodes.assess_BP4, 1, VCFHeaderLineType.Integer,      "Predicted to be benign by at least 1 of the following in silico prediction algorithms: "+inSilicoFuns.map(_._1).mkString(","))
+              ) ++ inSilicoFuns.map(_._1).map{sf => {
+                new VCFInfoHeaderLine(vcfCodes.assess_inSilicoSummary + "_"+ sf,  1, VCFHeaderLineType.String,   "For "+sf+", the summary determination of whether it was considered \"Damaging\", \"Benign\", \"Ambiguous\" or \"Unknown\".")
+              }}.toList;
             } else {
               List[VCFInfoHeaderLine]()
             }
-          )
+          ) ++ ( if(pseudoGeneGTF.isDefined){ Some(new VCFInfoHeaderLine(vcfCodes.assess_pseudogene, 1, VCFHeaderLineType.String,   "Variant overlaps with a known pseudogene.")) } else { None })
             
       val newHeader = internalUtils.VcfTool.addHeaderLines(vcfHeader,newHeaderLines);
       reportln("Walking input VCF...","note")
@@ -872,12 +1040,18 @@ object CalcACMGVar {
             locusIsRepetitive = locusIsRepetitive,
             locusIsConserved = locusIsConserved,
             locusIsHotspot = locusIsHotspot,
+            locusIsMappable = locusIsMappable,
             ctrlAlleFreqKeys = ctrlAlleFreqKeys,
-            inSilicoKeysOpt = inSilicoKeysOpt,
-            inSilicoMin = inSilicoMin,
+            //inSilicoKeysOpt = inSilicoKeysOpt,
+            //inSilicoMin = inSilicoMin,
+            inSilicoFuns = inSilicoFuns,inSilicoSummary=inSilicoSummary,
             BA1_AF = BA1_AF,
             PM2_AF = PM2_AF,
             clinVarVariantSet = clinVarVariantSet,
+            clinVarVariants_LOFSet = clinVarVariants_LOFSet,
+            clinVarVariants_startLoss = clinVarVariants_startLoss,
+            clinVarVariants_stopLoss =clinVarVariants_stopLoss,
+            locusIsPseudogene = locusIsPseudogene,
             vcfCodes = vcfCodes)
        }), newHeader );
     }
@@ -896,15 +1070,23 @@ object CalcACMGVar {
                     locusIsRepetitive : (commonSeqUtils.GenomicInterval => Boolean) ,
                     locusIsConserved  : (commonSeqUtils.GenomicInterval => Boolean) ,
                     locusIsHotspot    : (commonSeqUtils.GenomicInterval => Boolean) ,
+                    locusIsMappable   : Option[(commonSeqUtils.GenomicInterval => Boolean)] ,
+                    locusIsPseudogene : Option[(commonSeqUtils.GenomicInterval => Boolean)] ,
                     ctrlAlleFreqKeys : Seq[String] = Seq("1KG_AF","ESP_EA_AF","ExAC_ALL","SWH_AF_GRP_CTRL"),
                     
-                    inSilicoKeysOpt : Option[Seq[(String,Set[String],Set[String])]],
-                    inSilicoMin : Int, //-1 == ALL
+                    inSilicoFuns : Seq[(String,StringToBool,StringToBool)],
+                    inSilicoSummary : (VariantContext => (String,Seq[String])),
+                    //inSilicoKeysOpt : Option[Seq[(String,Set[String],Set[String])]],
+                    //inSilicoMin : Int, //-1 == ALL
                     //inSilicoToleratedCt : Int = 1,
                     
                     BA1_AF : Double = 0.05,
                     PM2_AF : Double = 0.0001,
                     clinVarVariantSet : scala.collection.Map[String,(String,Int,String)],
+                    clinVarVariants_LOFSet : scala.collection.Map[String,Set[TXUtil.pVariantInfo]],
+                    clinVarVariants_startLoss : scala.collection.Map[String,Set[TXUtil.pVariantInfo]],
+                    clinVarVariants_stopLoss : scala.collection.Map[String,Set[TXUtil.pVariantInfo]],
+                    
                     vcfCodes : VCFAnnoCodes = VCFAnnoCodes()
                     
                     //clinVarVariants?
@@ -941,6 +1123,26 @@ object CalcACMGVar {
     val isRepetitive = locusIsRepetitive(variantIV);
     val isConserved  = locusIsConserved(variantIV);
     val isHotspot    = locusIsHotspot(variantIV);
+    
+    locusIsMappable match {
+      case Some(locusMapFunc) => {
+        val isMappable = locusMapFunc(variantIV);
+        vb = vb.attribute(vcfCodes.assess_IsMappable , if(isMappable) "1" else "0");
+      }
+      case None => {
+        //do nothing
+      }
+    }
+    
+    locusIsPseudogene match {
+      case Some(locusMapFunc) => {
+        val isLocus = locusMapFunc(variantIV);
+        vb = vb.attribute(vcfCodes.assess_pseudogene , if(isLocus) "1" else "0");
+      }
+      case None => {
+        //do nothing
+      }
+    }
     
     if(altAlleles.length > 1){
       error("FATAL ERROR: Cannot deal with multiallelic variants! Split variants to single-allelic!");
@@ -1034,7 +1236,7 @@ object CalcACMGVar {
         problemList = problemList + "MG|MultipleGene";
       }
       
-      val numVariantTypes = Seq[Boolean]( 
+      val numVariantTypes = Seq[Boolean](
         (combo.exists{case (g,tx,info,c,i) => {
           info.severityType == "LLOF" || info.subType == "START-LOSS" || info.subType == "splice"
         }}),
@@ -1203,6 +1405,106 @@ object CalcACMGVar {
         ""
       }
       
+      var downstreamPathoLOFRS = Set[String]();
+      var codonPathoLOFRS = Set[String]();
+      var downstreamPathoLOFRS_CANON = Set[String]();
+      var codonPathoLOFRS_CANON = Set[String]();
+      combo.filter{ case (g,tx,info,c,i) => {
+        info.severityType == "LLOF" || info.pType == "START-LOSS" || info.subType == "splice" || info.subType == "possSplice"
+      }}.foreach{ case (g,tx,info,c,i) => {
+        val txvar = clinVarVariants_LOFSet(tx);
+        val txvar_downstream_patho = txvar.filter{ p => {
+          p.start >= info.start && (p.CLNSIG == 4 || p.CLNSIG == 5)
+        }}
+        val txvar_downstream_patho_rs = txvar_downstream_patho.map{ p => p.ID }
+        val txvar_codon_patho = txvar_downstream_patho.filter{ p => {
+          p.start == info.start;
+        }}
+        val txvar_codon_patho_rs = txvar_codon_patho.map{p => p.ID}
+        downstreamPathoLOFRS = downstreamPathoLOFRS ++ txvar_downstream_patho_rs;
+        codonPathoLOFRS = codonPathoLOFRS ++ txvar_codon_patho_rs;
+        if(isRefSeq(tx)){
+          downstreamPathoLOFRS_CANON = downstreamPathoLOFRS_CANON ++ txvar_downstream_patho_rs;
+          codonPathoLOFRS_CANON = codonPathoLOFRS_CANON ++ txvar_codon_patho_rs;
+        }
+      }}
+      
+
+      //vb =  vb.attribute(vcfCodes.assess_forBT_exactLOF,      exactPathoRS.toList.sorted.map{_.toString}.padTo(1,".").mkString(","));
+      
+      vb =  vb.attribute(vcfCodes.assess_forBT_codonLOF,      codonPathoLOFRS.toList.sorted.map{_.toString}.padTo(1,".").mkString(","));
+      vb =  vb.attribute(vcfCodes.assess_forBT_codonLOF_CANON,codonPathoLOFRS_CANON.toList.sorted.map{_.toString}.padTo(1,".").mkString(","));
+      vb =  vb.attribute(vcfCodes.assess_forBT_downstreamLOF,      downstreamPathoLOFRS.toList.sorted.map{_.toString}.padTo(1,".").mkString(","));
+      vb =  vb.attribute(vcfCodes.assess_forBT_downstreamLOF_CANON,downstreamPathoLOFRS_CANON.toList.sorted.map{_.toString}.padTo(1,".").mkString(","));
+      
+      var geneHasDownstreamLOF = Set[String]();
+      var txHasDownstreamLOF = Set[String]();
+      var geneHasDownstreamLOF_CANON = Set[String]();
+      var txHasDownstreamLOF_CANON = Set[String]();
+      
+      var geneHasStartLoss = Set[String]();
+      var txHasStartLoss = Set[String]();
+      var geneHasStartLoss_CANON = Set[String]();
+      var txHasStartLoss_CANON = Set[String]();
+      
+      var geneHasStopLoss = Set[String]();
+      var txHasStopLoss = Set[String]();
+      var geneHasStopLoss_CANON = Set[String]();
+      var txHasStopLoss_CANON = Set[String]();
+      
+      combo.foreach{ case (g,tx,info,c,i) => {
+        val hasDownstreamPatho = clinVarVariants_LOFSet(tx).exists{ p => {
+          p.start >= info.start && (p.CLNSIG == 4 || p.CLNSIG == 5)
+        }}
+        if(hasDownstreamPatho){
+          geneHasDownstreamLOF = geneHasDownstreamLOF + g;
+          txHasDownstreamLOF = txHasDownstreamLOF + tx;
+          if(isRefSeq(tx)){
+            geneHasDownstreamLOF_CANON = geneHasDownstreamLOF_CANON + g;
+            txHasDownstreamLOF_CANON = txHasDownstreamLOF_CANON + tx;
+          }
+        }
+        
+        val hasStartLoss = clinVarVariants_startLoss(tx).exists{ p => {
+          (p.CLNSIG == 4 || p.CLNSIG == 5)
+        }}
+        if(hasStartLoss){
+          geneHasStartLoss = geneHasStartLoss + g;
+          txHasStartLoss = txHasStartLoss + tx;
+          if(isRefSeq(tx)){
+            geneHasStartLoss_CANON = geneHasStartLoss_CANON + g;
+            txHasStartLoss_CANON = txHasStartLoss_CANON + tx;
+          }
+        }
+        
+        val hasStopLoss = clinVarVariants_stopLoss(tx).exists{ p => {
+          (p.CLNSIG == 4 || p.CLNSIG == 5)
+        }}
+        if(hasStopLoss){
+          geneHasStopLoss = geneHasStopLoss + g;
+          txHasStopLoss = txHasStopLoss + tx;
+          if(isRefSeq(tx)){
+            geneHasStopLoss_CANON = geneHasStopLoss_CANON + g;
+            txHasStopLoss_CANON = txHasStopLoss_CANON + tx;
+          }
+        }
+      }}
+      
+      vb =  vb.attribute(vcfCodes.assess_forBT_geneHasDownstreamLOF,        geneHasDownstreamLOF.toList.sorted.map{_.toString}.padTo(1,".").mkString(","));
+      vb =  vb.attribute(vcfCodes.assess_forBT_geneHasDownstreamLOF_CANON,  geneHasDownstreamLOF_CANON.toList.sorted.map{_.toString}.padTo(1,".").mkString(","));
+      vb =  vb.attribute(vcfCodes.assess_forBT_geneHasStartLoss,            geneHasStartLoss.toList.sorted.map{_.toString}.padTo(1,".").mkString(","));
+      vb =  vb.attribute(vcfCodes.assess_forBT_geneHasStartLoss_CANON,      geneHasStartLoss_CANON.toList.sorted.map{_.toString}.padTo(1,".").mkString(","));
+      vb =  vb.attribute(vcfCodes.assess_forBT_geneHasStopLoss,             geneHasStopLoss.toList.sorted.map{_.toString}.padTo(1,".").mkString(","));
+      vb =  vb.attribute(vcfCodes.assess_forBT_geneHasStopLoss_CANON,       geneHasStopLoss_CANON.toList.sorted.map{_.toString}.padTo(1,".").mkString(","));
+      
+       // assess_forBT_geneHasDownstreamLOF : String = TOP_LEVEL_VCF_TAG+"ASSESS_geneList_hasPathoDownstreamLOF",
+      //  assess_forBT_geneHasStartLoss : String = TOP_LEVEL_VCF_TAG+"ASSESS_geneList_hasPathoStartLoss",
+      //  assess_forBT_geneHasStopLoss : String = TOP_LEVEL_VCF_TAG+"ASSESS_geneList_hasPathoStopLoss",
+      //  assess_forBT_geneHasDownstreamLOF_CANON : String = TOP_LEVEL_VCF_TAG+"ASSESS_geneList_hasPathoDownstreamLOF_CANON",
+      //  assess_forBT_geneHasStartLoss_CANON : String = TOP_LEVEL_VCF_TAG+"ASSESS_geneList_hasPathoStartLoss_CANON",
+      //  assess_forBT_geneHasStopLoss_CANON : String = TOP_LEVEL_VCF_TAG+"ASSESS_geneList_hasPathoStopLoss_CANON",
+      
+      
       var aminoMatchInfo = Set[(String,Int,String)]();
       var nearMatchInfo = Set[(String,Int,String)]();
       
@@ -1248,8 +1550,11 @@ object CalcACMGVar {
             pm5 = pm5.merge(ACMGCrit("PM",5,true,Seq[String](tx+":"+info.pvar+"Vs"+partialPathoMatch.head.altAA)));
             if(isRefSeq(tx)) pm5_canon = pm5_canon.merge(ACMGCrit("PM",5,true,Seq[String](tx+":"+info.pvar+"Vs"+partialPathoMatch.head.altAA)));
           }
+        } else if(info.pType == "STOP-LOSS"){
+          //do stuff?
+        } else if(info.subType == "indelAA" || info.subType == "insAA" || info.subType == "delAA"){ //what about "multSwapAA"?
+          //do stuff?
         }
-        
       }}
       
       if(ps1.flag){
@@ -1441,9 +1746,10 @@ object CalcACMGVar {
         canonCrits.addCrit(new ACMGCrit("BP",4,isOkFlag,Seq[String]()));
       }*/
       
+      /*
       if(inSilicoKeysOpt.isDefined){
         val inSilicoKeys = inSilicoKeysOpt.get;
-        val inSilicoRaw = inSilicoKeys.map{case (key,damSet,safeSet) => {
+        val inSilicoRaw = inSilicoKeys.map{ case (key,damSet,safeSet) => {
             v.getAttributeAsList(key).toList;
         }}
         val inSilicoStats = inSilicoRaw.zip(inSilicoKeys).map{ case (isk,(key,damSet,safeSet)) => {
@@ -1474,8 +1780,33 @@ object CalcACMGVar {
         vb = vb.attribute(vcfCodes.assess_BP4, if(isBenign) "1" else "0" );
         
         vb = vb.attribute(vcfCodes.assess_inSilicoSummary, inSilicoStats.mkString(",") );
-      }
+      }*/
       
+      if(inSilicoFuns.length > 0){
+        val (inSilicoResult,algSummaries) = inSilicoSummary(v);
+        
+        val isDamaging = inSilicoResult == "Damaging"
+        val isBenign   = inSilicoResult == "Benign"
+        
+        crits.addCrit(new ACMGCrit("PP",3,isDamaging,Seq[String]()));
+        crits.addCrit(new ACMGCrit("BP",4,isBenign,Seq[String]()));
+        canonCrits.addCrit(new ACMGCrit("PP",3,isDamaging,Seq[String]()));
+        canonCrits.addCrit(new ACMGCrit("BP",4,isBenign,Seq[String]()));
+        vb = vb.attribute(vcfCodes.assess_PP3, if(isDamaging) "1" else "0" );
+        vb = vb.attribute(vcfCodes.assess_BP4, if(isBenign) "1" else "0" );
+        
+        if(inSilicoResult != "."){
+          vb = vb.attribute(vcfCodes.assess_inSilicoSummary, inSilicoResult );
+        }
+        
+        //inSilicoFuns.map(_._1).foreach{sf => {
+                //new VCFInfoHeaderLine(vcfCodes.assess_inSilicoSummary + "_"+ sf
+          inSilicoFuns.zip(algSummaries).foreach{ case ((tag,damFun,benFun),status) => {  
+            vb = vb.attribute(vcfCodes.assess_inSilicoSummary + "_"+ tag,status);
+          }}
+          
+        //}}
+      }
       
       //******************************* BP7: Synonymous w/ no splice impact, not highly conserved:
       val bp7flag = (! isConserved) && combo.forall{case (g,tx,info,c,i) => {
@@ -1613,92 +1944,168 @@ object CalcACMGVar {
   }
   
   //output: tx => Set[(HGVDc,pVariantInfo])]
-  def getFullClinVarVariants(infile : String, chromList : Option[List[String]], vcfCodes : VCFAnnoCodes = VCFAnnoCodes()) : (scala.collection.Map[String,(String,Int,String)],scala.collection.Map[String,Set[internalUtils.TXUtil.pVariantInfo]]) = {
-    val (vcIter,vcfHeader) = internalUtils.VcfTool.getVcfIterator(infile, 
-                                                                  chromList = chromList,
-                                                                  vcfCodes = vcfCodes);
-    
+  def getFullClinVarVariants(infile : String, chromList : Option[List[String]], vcfCodes : VCFAnnoCodes = VCFAnnoCodes(), hgmdVarVcf : Option[String] = None
+                            ) : (scala.collection.Map[String,(String,Int,String)],scala.collection.Map[String,Set[internalUtils.TXUtil.pVariantInfo]]) = {
+
     val out = new scala.collection.mutable.AnyRefMap[String,Set[internalUtils.TXUtil.pVariantInfo]](((k : String) => Set[internalUtils.TXUtil.pVariantInfo]()));
+    
+    //gvariation
     var gset = new scala.collection.mutable.AnyRefMap[String,(String,Int,String)]();
     
-    reportln("Starting VCF read/write...","progress");
-    for(v <- vcIter){
-      try {
-      val rsnum = v.getAttributeAsString("RS","unknownRSNUM") //v.getID();
-      val refAlle = v.getReference();
-      val altAlleles = Range(0,v.getNAlleles()-1).map((a) => v.getAlternateAllele(a));
-      //val vTypesList = v.getAttributeAsList(vcfCodes.vType_TAG).toVector.map(_.toString.split(vcfCodes.delims(1)).toVector);
-      val txList = v.getAttributeAsList(vcfCodes.txList_TAG).toVector.map(_.toString).filter(_ != ".");
-      //val vMutPList = v.getAttributeAsList(vcfCodes.vMutP_TAG).toVector.map(_.toString.split(vcfCodes.delims(1)).toVector);
-      val vMutCListRaw = v.getAttributeAsList(vcfCodes.vMutP_TAG).toVector.filter(_ != ".");
-      val vMutCList = vMutCListRaw.map(_.toString.split("\\|").toVector);
-      val chrom = v.getContig();
-      
-      val vMutGList = v.getAttributeAsList(vcfCodes.vMutG_TAG).toVector.filter(_ != ".");
-
-      val vClnSig = v.getAttributeAsList("CLNSIG").toVector.map(_.toString());
-      val clnsig = vClnSig.zipWithIndex.map{case (sigstr,altidx) => {
-        val clnSig = sigstr.split("\\|");
-        (getSummaryClinSig(clnSig),clnSig.mkString(":"));
-      }}
-
-      val vMutInfoList = if(txList.length > 0) {
-        v.getAttributeAsList(vcfCodes.vMutINFO_TAG).toVector.zipWithIndex.map{ case (attrObj, altIdx) => {
-          val attrString = attrObj.toString();
-          val attrSplit = attrString.split("\\|").toVector
-          //reportln("vMutInfoListDebug: attrString = \""+attrString+"\"","debug");
-          //reportln("vMutInfoListDebug: attrSplit["+attrSplit.length+"] = [\""+attrSplit.mkString("\", \"")+"\"]","debug");
+    if(true){
+      val (vcIter,vcfHeader) = internalUtils.VcfTool.getVcfIterator(infile, 
+                                                                  chromList = chromList,
+                                                                  vcfCodes = vcfCodes);
+      reportln("Starting ClinVar VCF read...","progress");
+      for(v <- vcIter){
+        try {
+          val rsnum = v.getAttributeAsString("RS","unknownRSNUM") //v.getID();
+          val refAlle = v.getReference();
+          val altAlleles = Range(0,v.getNAlleles()-1).map((a) => v.getAlternateAllele(a));
+          //val vTypesList = v.getAttributeAsList(vcfCodes.vType_TAG).toVector.map(_.toString.split(vcfCodes.delims(1)).toVector);
+          val txList = v.getAttributeAsList(vcfCodes.txList_TAG).toVector.map(_.toString).filter(_ != ".");
+          //val vMutPList = v.getAttributeAsList(vcfCodes.vMutP_TAG).toVector.map(_.toString.split(vcfCodes.delims(1)).toVector);
+          val vMutCListRaw = v.getAttributeAsList(vcfCodes.vMutP_TAG).toVector.filter(_ != ".");
+          val vMutCList = vMutCListRaw.map(_.toString.split("\\|").toVector);
+          val chrom = v.getContig();
           
-          attrSplit.map{ case (x) => {
-            //val clnSig = vClnSig(altIdx).split("\\|");
-            //0 - Uncertain significance, 1 - not provided, 2 - Benign, 3 - Likely benign, 4 - Likely pathogenic, 5 - Pathogenic, 6 - drug response, 7 - histocompatibility, 255 - other                        
-            val (cs,csRaw) = clnsig(altIdx) //getSummaryClinSig(clnSig);
-            internalUtils.TXUtil.getPvarInfoFromString(x, ID = rsnum,CLNSIG=cs,RAWCLNSIG=csRaw);
+          val vMutGList = v.getAttributeAsList(vcfCodes.vMutG_TAG).toVector.filter(_ != ".");
+    
+          val vClnSig = v.getAttributeAsList("CLNSIG").toVector.map(_.toString());
+          val clnsig = vClnSig.zipWithIndex.map{case (sigstr,altidx) => {
+            val clnSig = sigstr.split("\\|");
+            (getSummaryClinSig(clnSig),clnSig.mkString(":"));
           }}
-        }}
-      } else {
-        Vector();
-      }
-      
-      if(txList.length > 0) { 
-        for((alle,altIdx) <- altAlleles.zipWithIndex.filter{case (a,i) => { a.getBaseString() != "*" }}){
-           //vMutGList.foreach(g => {
-           //  gset(chrom + ":" + g) = rsnum;
-           //})
-           //val vTypes = vTypesList(altIdx);
-           //val vMutP = vMutPList(altIdx);
-           val vMutC = vMutCList(altIdx);
-           val vInfo = vMutInfoList(altIdx);
-           
-           if(vMutC.length != txList.length){
-             reportln("vMutC.length = "+vMutC.length+", txList = "+txList+"\nvMutC = [\""+vMutC.mkString("\",\"")+"\"]","debug");
-           }
-           //if(hasPatho && (! hasBenign)){
-             for(i <- Range(0,txList.length)){
-               val tx = txList(i);
-               out(tx) = out(tx) + (vInfo(i));
-             }
-             gset(chrom + ":" + vMutGList(altIdx)) = (rsnum,clnsig(altIdx)._1,clnsig(altIdx)._2);
-           //}
+    
+          val vMutInfoList = if(txList.length > 0) {
+            v.getAttributeAsList(vcfCodes.vMutINFO_TAG).toVector.zipWithIndex.map{ case (attrObj, altIdx) => {
+              val attrString = attrObj.toString();
+              val attrSplit = attrString.split("\\|").toVector
+              //reportln("vMutInfoListDebug: attrString = \""+attrString+"\"","debug");
+              //reportln("vMutInfoListDebug: attrSplit["+attrSplit.length+"] = [\""+attrSplit.mkString("\", \"")+"\"]","debug");
+              
+              attrSplit.map{ case (x) => {
+                //val clnSig = vClnSig(altIdx).split("\\|");
+                //0 - Uncertain significance, 1 - not provided, 2 - Benign, 3 - Likely benign, 4 - Likely pathogenic, 5 - Pathogenic, 6 - drug response, 7 - histocompatibility, 255 - other                        
+                val (cs,csRaw) = clnsig(altIdx) //getSummaryClinSig(clnSig);
+                internalUtils.TXUtil.getPvarInfoFromString(x, ID = rsnum,CLNSIG=cs,RAWCLNSIG=csRaw);
+              }}
+            }}
+          } else {
+            Vector();
+          }
+          
+          if(txList.length > 0) { 
+            for((alle,altIdx) <- altAlleles.zipWithIndex.filter{case (a,i) => { a.getBaseString() != "*" }}){
+               //vMutGList.foreach(g => {
+               //  gset(chrom + ":" + g) = rsnum;
+               //})
+               //val vTypes = vTypesList(altIdx);
+               //val vMutP = vMutPList(altIdx);
+               val vMutC = vMutCList(altIdx);
+               val vInfo = vMutInfoList(altIdx);
+               
+               if(vMutC.length != txList.length){
+                 reportln("vMutC.length = "+vMutC.length+", txList = "+txList+"\nvMutC = [\""+vMutC.mkString("\",\"")+"\"]","debug");
+               }
+               //if(hasPatho && (! hasBenign)){
+                 for(i <- Range(0,txList.length)){
+                   val tx = txList(i);
+                   out(tx) = out(tx) + (vInfo(i));
+                 }
+                 gset(chrom + ":" + vMutGList(altIdx)) = (rsnum,clnsig(altIdx)._1,clnsig(altIdx)._2);
+               //}
+            }
+          }
+  
+        } catch {
+          case e : Exception => {
+            reportln("Caught Exception on line:","note");
+            reportln(v.toStringWithoutGenotypes(),"note");
+            throw e;
+          }
         }
       }
-
-      } catch {
-        case e : Exception => {
-          reportln("Caught Exception on line:","note");
-          reportln(v.toStringWithoutGenotypes(),"note");
-          throw e;
+      
+      out.keySet.toVector.slice(0,10).foreach(tx => {
+        val varSeq = out(tx);
+        reportln("Example ClinVar TX: "+tx,"debug");
+        varSeq.slice(0,10).foreach{ (info) => {
+          reportln("      " + info.txid + "|" + info.pvar + "|"+info.ID+"|"+info.CLNSIG+"|"+info.RAWCLNSIG,"debug");
+        }}
+      })
+    }
+    
+    hgmdVarVcf match {
+      case None => {
+        //do nothing!
+      }
+      case Some(hgmdVcf) => {
+        val (vcIter,vcfHeader) = internalUtils.VcfTool.getVcfIterator(hgmdVcf, 
+                                                                  chromList = chromList,
+                                                                  vcfCodes = vcfCodes);
+        reportln("Starting HGMD VCF read...","progress");
+        
+        for(v <- vcIter){
+          try {
+            val rsnum = v.getAttributeAsString("ACC_NUM","unknownRSNUM") //v.getID();
+            val refAlle = v.getReference();
+            val altAlleles = Range(0,v.getNAlleles()-1).map((a) => v.getAlternateAllele(a));
+            //val vTypesList = v.getAttributeAsList(vcfCodes.vType_TAG).toVector.map(_.toString.split(vcfCodes.delims(1)).toVector);
+            val txList = v.getAttributeAsList(vcfCodes.txList_TAG).toVector.map(_.toString).filter(_ != ".");
+            //val vMutPList = v.getAttributeAsList(vcfCodes.vMutP_TAG).toVector.map(_.toString.split(vcfCodes.delims(1)).toVector);
+            val vMutCListRaw = v.getAttributeAsList(vcfCodes.vMutP_TAG).toVector.filter(_ != ".");
+            val vMutCList = vMutCListRaw.map(_.toString.split("\\|").toVector);
+            val chrom = v.getContig();
+            
+            val vMutGList = v.getAttributeAsList(vcfCodes.vMutG_TAG).toVector.filter(_ != ".");
+            
+            val hgmdClass = v.getAttributeAsList("").toVector.map(_.toString()).padTo(1,"NA");
+            
+            val vMutInfoList = if(txList.length > 0) {
+              v.getAttributeAsList(vcfCodes.vMutINFO_TAG).toVector.zipWithIndex.map{ case (attrObj, altIdx) => {
+                val attrString = attrObj.toString();
+                val attrSplit = attrString.split("\\|").toVector
+                attrSplit.map{ case (x) => {
+                  //val clnSig = vClnSig(altIdx).split("\\|");
+                  //0 - Uncertain significance, 1 - not provided, 2 - Benign, 3 - Likely benign, 4 - Likely pathogenic, 5 - Pathogenic, 6 - drug response, 7 - histocompatibility, 255 - other                        
+                  internalUtils.TXUtil.getPvarInfoFromString(x, ID = "HGMDID_"+rsnum,CLNSIG=5,RAWCLNSIG="HGMD_"+hgmdClass(altIdx));
+                }}
+              }}
+            } else {
+              Vector();
+            }
+            if(txList.length > 0) { 
+              for((alle,altIdx) <- altAlleles.zipWithIndex.filter{case (a,i) => { a.getBaseString() != "*" }}){
+                 val vMutC = vMutCList(altIdx);
+                 val vInfo = vMutInfoList(altIdx);
+                 
+                 if(vMutC.length != txList.length){
+                   reportln("vMutC.length = "+vMutC.length+", txList = "+txList+"\nvMutC = [\""+vMutC.mkString("\",\"")+"\"]","debug");
+                 }
+                 for(i <- Range(0,txList.length)){
+                   val tx = txList(i);
+                   out(tx) = out(tx) + (vInfo(i));
+                 }
+                 if(gset.containsKey(chrom + ":" + vMutGList(altIdx))){
+                   val oldVal = gset(chrom + ":" + vMutGList(altIdx));
+                   gset(chrom + ":" + vMutGList(altIdx)) = (oldVal+"|HGMDID_"+rsnum,5,oldVal+"HGMD_"+hgmdClass(altIdx));
+                 } else {
+                   gset(chrom + ":" + vMutGList(altIdx)) = ("HGMDID_"+rsnum,5,"HGMD_"+hgmdClass(altIdx));
+                 }
+              }
+            }
+            
+          }  catch {
+            case e : Exception => {
+              reportln("Caught Exception on line:","note");
+              reportln(v.toStringWithoutGenotypes(),"note");
+              throw e;
+            }
+          }
         }
       }
     }
-    
-    out.keySet.toVector.slice(0,10).foreach(tx => {
-      val varSeq = out(tx);
-      reportln("Example ClinVar TX: "+tx,"debug");
-      varSeq.slice(0,10).foreach{ (info) => {
-        reportln("      " + info.txid + "|" + info.pvar + "|"+info.ID+"|"+info.CLNSIG+"|"+info.RAWCLNSIG,"debug");
-      }}
-    })
     
     return (gset,out);
   }

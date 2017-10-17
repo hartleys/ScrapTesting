@@ -87,7 +87,9 @@ object VcfTool {
         assess_IsConserved : String = TOP_LEVEL_VCF_TAG+"locusIsCons",
         assess_IsHotspot : String = TOP_LEVEL_VCF_TAG+"locusIsHotspot",
         assess_domain : String = TOP_LEVEL_VCF_TAG+"locusDomain",
-        
+        assess_IsMappable : String = TOP_LEVEL_VCF_TAG+"locusIsMappable",
+        assess_pseudogene : String = TOP_LEVEL_VCF_TAG+"locusIsPseudogene", 
+
         assess_criteria : String = TOP_LEVEL_VCF_TAG+"ACMG_criteria",
         
         assess_GeneSenseLOF :String = TOP_LEVEL_VCF_TAG+"ACMG_GeneSenseLOF",
@@ -140,7 +142,39 @@ object VcfTool {
         assess_PS1_CANON : String = TOP_LEVEL_VCF_TAG+"ACMG_PS1_CANON",
         assess_PM5_CANON : String = TOP_LEVEL_VCF_TAG+"ACMG_PM5_CANON",
         assess_BP7_CANON : String = TOP_LEVEL_VCF_TAG+"ACMG_BP7_CANON",
-        assess_RATING_CANON : String = TOP_LEVEL_VCF_TAG+"ACMG_RATING_CANON",
+        assess_RATING_CANON : String = TOP_LEVEL_VCF_TAG+"ACMG_RATING_CANON", 
+        
+        //NEW: 
+         
+        assess_forBT_codonLOF : String = TOP_LEVEL_VCF_TAG+"ASSESS_LOF_codonPathoRS",
+        assess_forBT_downstreamLOF  : String = TOP_LEVEL_VCF_TAG+"ASSESS_LOF_downstreamPathoRS",
+        
+        assess_forBT_codonLOF_CANON : String = TOP_LEVEL_VCF_TAG+"ASSESS_LOF_codonPathoRS_CANON",
+        assess_forBT_downstreamLOF_CANON : String = TOP_LEVEL_VCF_TAG+"ASSESS_LOF_downstreamPathoRS_CANON",
+        
+        assess_forBT_geneHasDownstreamLOF : String = TOP_LEVEL_VCF_TAG+"GENEINFO_geneHasPatho_DownstreamLOF",
+        assess_forBT_geneHasStartLoss : String = TOP_LEVEL_VCF_TAG+"GENEINFO_geneHasPatho_StartLoss",
+        assess_forBT_geneHasStopLoss : String = TOP_LEVEL_VCF_TAG+"GENEINFO_geneHasPatho_StopLoss",
+        assess_forBT_geneHasDownstreamLOF_CANON : String = TOP_LEVEL_VCF_TAG+"GENEINFO_geneHasPatho_DownstreamLOF_CANON",
+        assess_forBT_geneHasStartLoss_CANON : String = TOP_LEVEL_VCF_TAG+"GENEINFO_geneHasPatho_StartLoss_CANON",
+        assess_forBT_geneHasStopLoss_CANON : String = TOP_LEVEL_VCF_TAG+"GENEINFO_geneHasPatho_StopLoss_CANON",
+        
+        //NEW???????????????
+        assess_effectMatchInfo : String = TOP_LEVEL_VCF_TAG+"ACMG_cvInfo_EffectMatch",
+        assess_nearEffectMatchInfo : String = TOP_LEVEL_VCF_TAG+"ACMG_cvInfo_NearEffectMatch",
+        assess_effectMatchInfo_CANON : String = TOP_LEVEL_VCF_TAG+"ACMG_cvInfo_EffectMatch_CANON",
+        assess_nearEffectMatchInfo_CANON : String = TOP_LEVEL_VCF_TAG+"ACMG_cvInfo_NearEffectMatch_CANON",
+        
+        assess_pathoEffectMatchRS : String = TOP_LEVEL_VCF_TAG+"ACMG_cvPath_EffectMatchRS",
+        assess_pathoNearEffectMatchRS : String = TOP_LEVEL_VCF_TAG+"ACMG_cvPath_NearEffectMatchRS",
+        assess_pathoEffectMatchRS_CANON : String = TOP_LEVEL_VCF_TAG+"ACMG_cvPath_EffectMatchRS_CANON",
+        assess_pathoNearEffectMatchRS_CANON : String = TOP_LEVEL_VCF_TAG+"ACMG_cvPath_NearEffectMatchRS_CANON",
+        
+        assess_benEffectMatchRS : String = TOP_LEVEL_VCF_TAG+"ACMG_cvBen_EffectMatchRS",
+        assess_benNearEffectMatchRS : String = TOP_LEVEL_VCF_TAG+"ACMG_cvBen_NearEffectMatchRS",
+        assess_benEffectMatchRS_CANON : String = TOP_LEVEL_VCF_TAG+"ACMG_cvBen_EffectMatchRS_CANON",
+        assess_benNearEffectMatchRS_CANON : String = TOP_LEVEL_VCF_TAG+"ACMG_cvBen_NearEffectMatchRS_CANON",
+        ////////////
         
         assess_exactMatchInfo : String = TOP_LEVEL_VCF_TAG+"ACMG_cvInfo_ExactMatch",
         assess_aminoMatchInfo : String = TOP_LEVEL_VCF_TAG+"ACMG_cvInfo_AminoMatch",
@@ -159,9 +193,14 @@ object VcfTool {
         
         geneIDs : String = TOP_LEVEL_VCF_TAG+"txGeneIDs",
         
+        ec_CallMismatch : String = TOP_LEVEL_VCF_TAG+"EC_CallMismatch",
+        ec_CallMismatchStrict : String = TOP_LEVEL_VCF_TAG+"EC_CallMismatch_Strict",
+        ec_EnsembleWarnings : String = TOP_LEVEL_VCF_TAG+"EC_ENSEMBLE_WARNINGS",
+        ec_alle_callerSets : String = TOP_LEVEL_VCF_TAG+"EC_alle_callerSets",
+        ec_singleCallerAllePrefix : String = TOP_LEVEL_VCF_TAG+"EC_altAlle_",
         delims : Vector[String] = Vector(",","|")
       );
-  
+
   val DefaultVCFAnnoCodes = VCFAnnoCodes();
   
   val UNAUTOMATED_ACMG_PARAMS = Seq[(String,Int,String)](
@@ -334,8 +373,8 @@ object VcfTool {
               v.getContig() == chr;
             }}
           } else {
-            internalUtils.stdUtils.wrapIteratorWithAdvancedProgressReporter[VariantContext](vcfIterator,
-                internalUtils.stdUtils.AdvancedIteratorProgressReporter_ThreeLevel[VariantContext](elementTitle = "lines", a,b,c,((a : VariantContext,i : Int) => a.getContig()))).filter(v =>  cs.contains(v.getContig()));            
+            internalUtils.stdUtils.wrapIteratorWithAdvancedProgressReporter[VariantContext](vcfIterator.filter((p : VariantContext) => cs.contains(p.getContig())),
+                internalUtils.stdUtils.AdvancedIteratorProgressReporter_ThreeLevelAuto[VariantContext](elementTitle = "lines",lineSec = 60, reportFunction = ((a : VariantContext,i : Int) => a.getContig()))).filter(v =>  cs.contains(v.getContig())); 
           }
 
         }
@@ -672,20 +711,44 @@ object VcfTool {
   
   object SVcfLine {
     
-    def readVcf(lines : Iterator[String], withProgress : Boolean = true) : (SVcfHeader,Iterator[SVcfInputVariantLine]) = {
-      val (allRawHeaderLines,rawVariantLines) = lines.span(line => line.startsWith("#"));
+    def readVcfs(lines : Seq[Iterator[String]], withProgress : Boolean = true) : (SVcfHeader,Iterator[SVcfInputVariantLine]) = {
+      val (allRawHeaderLines,rawVariantLines0) = lines(0).span(line => line.startsWith("#"));
       val header = readVcfHeader(allRawHeaderLines.toVector);
+      
+      val rawVariantLines = rawVariantLines0 ++ lines.tail.flatten.filter{line => ! line.startsWith("#")};
       
       val variantLines = if(withProgress){
                          internalUtils.stdUtils.wrapIteratorWithAdvancedProgressReporter[SVcfInputVariantLine](
-                           rawVariantLines.map(line => SVcfInputVariantLine(line,header)),
+                           //rawVariantLines.map(line => SVcfInputVariantLine(line,header)),
+                           rawVariantLines.map(line => SVcfInputVariantLine(line)), 
                            internalUtils.stdUtils.AdvancedIteratorProgressReporter_ThreeLevelAuto[SVcfInputVariantLine](
                                 elementTitle = "lines", lineSec = 60,
                                 reportFunction  = ((vc : SVcfInputVariantLine, i : Int) => " " + vc.chrom +" "+ internalUtils.stdUtils.MemoryUtil.memInfo )
                            )
                          )
       } else {
-        rawVariantLines.map(line => SVcfInputVariantLine(line,header))
+        //rawVariantLines.map(line => SVcfInputVariantLine(line,header))
+        rawVariantLines.map(line => SVcfInputVariantLine(line))
+      }
+      (header,variantLines);
+    }
+    
+    def readVcf(lines : Iterator[String], withProgress : Boolean = true) : (SVcfHeader,Iterator[SVcfInputVariantLine]) = {
+      val (allRawHeaderLines,rawVariantLines) = lines.span(line => line.startsWith("#"));
+      val header = readVcfHeader(allRawHeaderLines.toVector);
+      
+      val variantLines = if(withProgress){
+                         internalUtils.stdUtils.wrapIteratorWithAdvancedProgressReporter[SVcfInputVariantLine](
+                           //rawVariantLines.map(line => SVcfInputVariantLine(line,header)),
+                           rawVariantLines.map(line => SVcfInputVariantLine(line)), 
+                           internalUtils.stdUtils.AdvancedIteratorProgressReporter_ThreeLevelAuto[SVcfInputVariantLine](
+                                elementTitle = "lines", lineSec = 60,
+                                reportFunction  = ((vc : SVcfInputVariantLine, i : Int) => " " + vc.chrom +" "+ internalUtils.stdUtils.MemoryUtil.memInfo )
+                           )
+                         )
+      } else {
+        //rawVariantLines.map(line => SVcfInputVariantLine(line,header))
+        rawVariantLines.map(line => SVcfInputVariantLine(line))
       }
       
       (header,variantLines);
@@ -741,6 +804,33 @@ object VcfTool {
                         var otherHeaderLines : Seq[SVcfHeaderLine],
                         var titleLine : SVcfTitleLine){
     def getVcfLines : Seq[String] = (otherHeaderLines ++ infoLines ++ formatLines :+ titleLine).map(_.getVcfString);
+    
+    def addFormatLine(line : SVcfCompoundHeaderLine){
+      val idx = formatLines.indexWhere{(p : SVcfCompoundHeaderLine) => {p.ID == line.ID}}
+      if( idx != -1 ){
+        formatLines = formatLines.updated(idx,line);
+      } else {
+        formatLines = formatLines :+ line;
+      }
+    }
+    def addInfoLine(line : SVcfCompoundHeaderLine){
+      val idx = infoLines.indexWhere{(p : SVcfCompoundHeaderLine) => {p.ID == line.ID}}
+      if( idx != -1 ){
+        infoLines = infoLines.updated(idx,line);
+      } else {
+        infoLines = infoLines :+ line;
+      }
+    }
+    
+    def getSampleList : Seq[String] = {
+      titleLine.sampleList;
+    }
+    def getSampleIdx(sampID : String) : Int = {
+      getSampleList.indexOf(sampID);
+    }
+    def sampleCt : Int = {
+      getSampleList.length;
+    }
   }
   
   abstract class SVcfLine {
@@ -796,15 +886,9 @@ object VcfTool {
                                 }}.mkString(";")+"\t"+
                                 format.mkString(":")+"\t"+
                                 genotypes.getGenotypeStrings.mkString("\t");
-    def header : SVcfHeader;
-    
-    def getSampleIdx(sampID : String) : Int = {
-      header.titleLine.sampleList.indexOf(sampID);
-    }
-    def sampleCt : Int = {
-      header.titleLine.sampleList.length;
-    } 
-    
+    //def header : SVcfHeader;
+    //def getSampleList : Seq[String];
+
     def getOutputLine() : SVcfOutputVariantLine = {
       SVcfOutputVariantLine(
        in_chrom = chrom,
@@ -816,13 +900,17 @@ object VcfTool {
        in_filter = filter,
        in_info = info,
        in_format = format,
-       in_genotypes = genotypes,
-       in_header = header
+       in_genotypes = genotypes//,
+       //in_header = header
       )
+    }
+    def getGt(gtTag : String) : Array[String] = {
+      error("Op not supported!");
+      null;
     }
   }
   
-  case class SVcfInputVariantLine(inputLine : String, in_header : SVcfHeader) extends SVcfVariantLine {
+  case class SVcfInputVariantLine(inputLine : String) extends SVcfVariantLine {
     override def getVcfString :  String = inputLine;
     
     lazy val cells = inputLine.split("\t");
@@ -855,10 +943,17 @@ object VcfTool {
     def info = lzy_info;
     def format = lzy_format;
     //def genotypeStrings = lzy_genotypeStrings;
-    lazy val lzy_genotypes = SVcfGenotypeSet.getGenotypeSet(lzy_genotypeStrings, header, format);
+    lazy val lzy_genotypes = SVcfGenotypeSet.getGenotypeSet(lzy_genotypeStrings, format);
     def genotypes = lzy_genotypes;
 
-    def header = in_header;
+    override def getGt(gtTag : String) : Array[String] = {
+      val gtIdx : Int = format.indexOf(gtTag);
+      if(gtIdx == -1) error("GT tag not found!");
+      lzy_genotypeStrings.map( gts => (gts.split(":",-1).padTo(gtIdx+1,".")).apply(gtIdx))
+    }
+    
+    //def getSampleList : Seq[String] = in_header.titleLine.sampleList;
+    //def header = in_header;
   }
   
   case class SVcfOutputVariantLine(
@@ -870,9 +965,9 @@ object VcfTool {
       var in_qual : String,
       var in_filter : String,
       var in_info : Map[String,Option[String]],
-      var in_format : Seq[String],
-      var in_genotypes : SVcfGenotypeSet,
-      var in_header : SVcfHeader
+      in_format : Seq[String],
+      var in_genotypes : SVcfGenotypeSet//,
+      //var in_header : SVcfHeader
       ) extends SVcfVariantLine {
     def chrom = in_chrom
     def pos = in_pos
@@ -882,43 +977,27 @@ object VcfTool {
     def qual = in_qual
     def filter = in_filter
     def info = in_info
-    def format = in_format
     def genotypes = in_genotypes
-    def header = in_header;
-    
-    def setGenotypeAttribute(sampID : String, tag : String, value : String) = {
-      val sampIdx = getSampleIdx(sampID);
-      val fmtIdx = format.indexOf(tag);
-      if(fmtIdx == -1){
-        genotypes.fmt = genotypes.fmt :+ header.formatLines.find(_.ID == tag).get;
-        in_format = in_format :+ tag;
-        val attrArray = Array.ofDim[String](sampleCt);
-        attrArray(sampIdx) = value;
-        genotypes.genotypeValues = genotypes.genotypeValues :+ attrArray;
-      } else {
-        genotypes.genotypeValues(fmtIdx)(sampIdx) = value;
-      }
-    }
-    
+    def format = genotypes.fmt
+    //def header = in_header;
     
   }
   
   object SVcfGenotypeSet {
-    def getGenotypeSet(genotypeStrings : Seq[String], header : SVcfHeader, fmt : Seq[String]) : SVcfGenotypeSet = {
-      val out = Array.ofDim[String](fmt.length,header.titleLine.sampleList.length)
-      val fmtLines = fmt.map(f => {
-        header.formatLines.find(_.ID == f).get;
-      });
-      
+    def getGenotypeSet(genotypeStrings : Seq[String], fmt : Seq[String]) : SVcfGenotypeSet = {
+      val out = Array.ofDim[String](fmt.length,genotypeStrings.length)
+      //val fmtLines = fmt.map(f => {
+      //  header.formatLines.find(_.ID == f).get;
+      //});
       
       val cells = genotypeStrings.map(_.split(":",-1).padTo(fmt.length,"."));
       
       try{
-      cells.indices.foreach(i => {
-        (0 until fmt.length).foreach(j => {
-          out(j)(i) = cells(i)(j);
+        cells.indices.foreach(i => {
+          (0 until fmt.length).foreach(j => {
+            out(j)(i) = cells(i)(j);
+          })
         })
-      })
       } catch {
         case e : Exception => {
           warning("Error attempting to decode genotypes:\n" + 
@@ -930,13 +1009,11 @@ object VcfTool {
         }
       }
       
-      SVcfGenotypeSet(fmt = fmtLines,sampIDs = header.titleLine.sampleList,
-                      genotypeValues = out);
+      SVcfGenotypeSet(fmt = fmt, genotypeValues = out);
     }
   }
   
-  case class SVcfGenotypeSet(var fmt : Seq[SVcfCompoundHeaderLine], 
-                             sampIDs : Seq[String], 
+  case class SVcfGenotypeSet(var fmt : Seq[String],
                              var genotypeValues : Array[Array[String]]){
     def getGenotypeStrings : Seq[String] = genotypeValues(0).indices.map(j => {
       genotypeValues.indices.map(i => {
@@ -944,8 +1021,690 @@ object VcfTool {
       }).mkString(":")
     }).toSeq;
     
-
+    def addGenotypeArray(fmtid : String, gval : Array[String]) : Int = {
+      val idx = fmt.indexWhere((p : String) => { p == fmtid });
+      if(idx != -1){
+        genotypeValues(idx) = gval;
+        return idx;
+      } else {
+        fmt = fmt :+ fmtid
+        genotypeValues = genotypeValues :+ gval;
+        return genotypeValues.length - 1;
+      }
+    }
+    def getPloidy() : Int = genotypeValues(0).map{ (g : String) => {g.split("/").length}}.max;
   }
+  
+  def getSVcfIterator(infile : String, chromList : Option[List[String]],numLinesRead : Option[Int]) : (Iterator[SVcfVariantLine],SVcfHeader) = {
+      val (vcfHeader,vcIter) = if(chromList.isEmpty){
+        SVcfLine.readVcf(getLinesSmartUnzip(infile),withProgress = true)
+      } else if(chromList.get.length == 1){
+        val chrom = chromList.get.head;
+        SVcfLine.readVcf(getLinesSmartUnzip(infile).filter{line => {
+          line.startsWith(chrom+"\t") || line.startsWith("#")
+        }},withProgress = true)
+      } else {
+        val chromSet = chromList.get.toSet;
+        val (vh,vi) = SVcfLine.readVcf(getLinesSmartUnzip(infile),withProgress = true)
+        (vh,vi.filter(line => { chromSet.contains(line.chrom) }))
+      }
+      
+      val vcIter2 = if(numLinesRead.isDefined){
+        vcIter.take(numLinesRead.get);
+      } else {
+        vcIter
+      }
+      (vcIter2,vcfHeader);
+  }
+  def getSVcfIterators(infileString : String, chromList : Option[List[String]],numLinesRead : Option[Int], inputFileList : Boolean = false) : (Iterator[SVcfVariantLine],SVcfHeader) = {
+      val indata = if(inputFileList){
+        val infiles = getLinesSmartUnzip(infileString)
+        val allInputLines = flattenIterators(infiles.map{inf => addIteratorCloseAction(iter =getLinesSmartUnzip(inf), closeAction = (() => {reportln("finished reading file: "+inf,"note")}))}).buffered
+        val headerLines = extractWhile(allInputLines)( a => a.startsWith("#"));
+        val remainderLines = allInputLines.filter( a => ! a.startsWith("#"));
+        headerLines.iterator ++ remainderLines;
+      } else if(infileString.contains(',')){
+        val infiles = infileString.split(",");
+        val allInputLines = flattenIterators(infiles.iterator.map{inf => addIteratorCloseAction(iter =getLinesSmartUnzip(inf), closeAction = (() => {reportln("finished reading file: "+inf,"note")}))}).buffered
+        val headerLines = extractWhile(allInputLines)( a => a.startsWith("#"));
+        val remainderLines = allInputLines.filter( a => ! a.startsWith("#"));
+        headerLines.iterator ++ remainderLines;
+      } else {
+        getLinesSmartUnzip(infileString)
+      }
+    
+    val (vcfHeader,vcIter) = if(chromList.isEmpty){
+        SVcfLine.readVcf(indata,withProgress = true)
+      } else if(chromList.get.length == 1){
+        val chrom = chromList.get.head;
+        SVcfLine.readVcf(indata.filter{line => {
+          line.startsWith(chrom+"\t") || line.startsWith("#")
+        }},withProgress = true)
+      } else {
+        val chromSet = chromList.get.toSet;
+        val (vh,vi) = SVcfLine.readVcf(indata,withProgress = true)
+        (vh,vi.filter(line => { chromSet.contains(line.chrom) }))
+      }
+      
+      val vcIter2 = if(numLinesRead.isDefined){
+        vcIter.take(numLinesRead.get);
+      } else {
+        vcIter
+      }
+      (vcIter2,vcfHeader);
+  }
+  abstract class SVcfWalker {
+    def walkVCF(vcIter : Iterator[SVcfVariantLine], vcfHeader : SVcfHeader, verbose : Boolean = true) : (Iterator[SVcfVariantLine],SVcfHeader)
+    def walkVCFFile(infile :String, outfile : String, chromList : Option[List[String]], numLinesRead : Option[Int]){
+      val (vcIter2, vcfHeader) = getSVcfIterator(infile,chromList,numLinesRead);
+      
+      val (newIter,newHeader) = walkVCF(vcIter2,vcfHeader,verbose=true);
+      
+      val writer = openWriterSmart(outfile);
+      newHeader.getVcfLines.foreach{line => {
+        writer.write(line+"\n");
+      }}
+      newIter.foreach{ line => {
+        writer.write(line.getVcfString+"\n");
+      }}
+      writer.close();
+    }
+  }
+  
+  
+  
+  
+  
+  def parseDebugReport(s : String){
+    println(s);
+  }
+  
+  abstract class SFilterLogic[A] {
+    def keep(vc : A) : Boolean;
+    def printTree() : String;
+  }
+  
+  case class SFilterTrue[A]() extends SFilterLogic[A] {
+    def keep(vc : A) : Boolean = true;
+    def printTree() : String = "[TRUE]"
+  }
+  
+  case class SFilterByFunc[A](fun : (A => Boolean), params : Seq[String], filterName : String = "UNK") extends SFilterLogic[A] {
+    def keep(vc : A) : Boolean = fun(vc);
+    def printTree() : String = "["+filterName+" " +params.mkString(" ")+"]";
+  }
+  
+  case class SFilterAND[A](a1: SFilterLogic[A], a2: SFilterLogic[A]) extends SFilterLogic[A] {
+    def keep(vc : A) : Boolean = {
+      if(! a1.keep(vc)) false;
+      else a2.keep(vc);
+    }
+    def printTree() : String = "["+a1.printTree()+" AND "+a2.printTree()+"]";
+  }
+  case class SFilterOR[A](a1: SFilterLogic[A], a2: SFilterLogic[A]) extends SFilterLogic[A] {
+    def keep(vc : A) : Boolean = {
+      if(a1.keep(vc)) true;
+      else a2.keep(vc);
+    }
+    def printTree() : String = "["+a1.printTree()+" OR "+a2.printTree()+"]";
+  }
+  case class SFilterNOT[A](a1 : SFilterLogic[A]) extends SFilterLogic[A] {
+    def keep(vc : A) : Boolean = {
+      ! a1.keep(vc);
+    }
+    def printTree() : String = "[NOT: "+a1.printTree()+"]";
+  }
+
+  def findMatchedParenIdx(strs : Seq[String], openParen : String = "(", closeParen : String = ")") : Int = {
+      if(strs.head != openParen){
+        error("findMatchedParenIdx run on non-paren char!");
+      }
+      val (depth, idx) = strs.tail.zipWithIndex.iterator.foldLeft((1,1)){ case ((currDepth,currIdx),(currChar,idx)) => {
+        if(currDepth == 0){
+          (currDepth, currIdx);
+        } else if(currChar == openParen){
+          (currDepth + 1, currIdx + 1)
+        } else if(currChar == closeParen){
+          (currDepth - 1, currIdx + 1)
+        } else {
+          (currDepth, currIdx + 1)
+        }
+      }}
+      idx;
+  }
+  
+  abstract class SFilterLogicParser[A](){
+    
+    
+    
+    def parseString(str : String) : SFilterLogic[A] = {
+      parseStringArray(str.trim().replaceAll("\\("," \\( ").replaceAll("\\)"," \\) ").trim().split("\\s+").toSeq);
+    }
+  
+    def parseStringArray(strs : Seq[String]) : SFilterLogic[A] = {
+      if(strs.length == 0){
+        error("Null SVcfFilterLogic!");
+      }
+      val str = strs.head;
+      
+      if(str == "("){
+        val closeIdx = findMatchedParenIdx(strs);
+        val parenStr = strs.take(closeIdx).tail.init;
+        parseDebugReport("Entering Parenthetical: [\"" + parenStr.mkString("\",\"") + "\"]" + " with remainder: [\"" + strs.drop(closeIdx).mkString("\",\"")+"\"]");
+        parseLogicFunc(parseStringArray(parenStr),strs.drop(closeIdx));
+      } else if(str == "NOT"){
+        SFilterNOT[A](parseStringArray(strs.tail));
+      } else if(strs.head.startsWith("FILT:")) {
+        parseDebugReport("Parsing Binary: [" + strs.head +"]");
+        parseLogicFunc(parseFilter(strs.head),strs.drop(1));
+      } else {
+        null;
+      }
+    }
+    
+    def parseLogicFunc(a : SFilterLogic[A], strs : Seq[String]) : SFilterLogic[A] = {
+      if(strs.length == 0){
+        a;
+      } else if(strs.head == "AND"){
+        SFilterAND[A](a,parseStringArray(strs.tail));
+      } else if(strs.head == "OR"){
+        SFilterOR[A](a,parseStringArray(strs.tail));
+      } else {
+        error("Filter logic parse error! Unrecognized logic func: "+strs.head);
+        null;
+      }
+    }
+    
+    
+
+    def parseFilter(str : String) : SFilterLogic[A] = {
+      if(! str.startsWith("FILT:")){
+        error("Filter Logic Parse Error! Filters must begin with \"FILT\"");
+      }
+      val cells = str.split(":")
+      if(cells.length < 2){
+        error("Filter Logic Parse Error! Filter must have at least 2 elements!");
+      }
+      val funID = cells(1);
+      val params = cells.drop(2)
+      val fun = getFilterFunction(cells(1),params);
+      SFilterByFunc[A](fun=fun,params=params,filterName=funID);
+    }
+    
+    case class FilterFunction(funcName : String, numParam : Int, desc : String, metaFunc : ((Seq[String]) => ((A) => Boolean))){
+      def getFunctionInfo() : String = {
+        funcName+"\t"+numParam+"\t"+desc;
+      }
+    }
+    
+    def filterFunctionSet : Set[FilterFunction];
+    def filterFunctionMap : Map[String,FilterFunction];
+    
+    def getAllFunctionInfo() : String = {
+      var out = "funcName\tnumParam\tdesc\n"
+      filterFunctionSet.toSeq.sortBy(f => f.funcName).foreach{ ff => {
+        out = out + ff.getFunctionInfo()+"\n";
+      }}
+      return out;
+    }
+    
+    def getFilterFunction(func : String, params : Seq[String]) : (A => Boolean) = {
+      filterFunctionMap.get(func) match {
+        case Some(ff) => {
+          if(ff.numParam != -1 && params.length != ff.numParam){
+            error("Filter Logic Parse Error: Filter Function " + func + " requres "+ff.numParam + " parameters. Found: Params=[\""+params.mkString("\",\"")+"\"]");
+          }
+          ff.metaFunc(params);
+        }
+        case None => {
+          error("Filter Logic Parse Error: Filter function " + func + " not recognized! Legal functions are: \n"+getAllFunctionInfo());
+          return null;
+        }
+      }
+    }
+  }
+  
+  case class SVcfFilterLogicParser() extends SFilterLogicParser[SVcfVariantLine]{
+    
+    def tagNonMissing(tag : String, a : SVcfVariantLine) : Boolean = {
+      a.info.containsKey(tag) && a.info(tag).get != "."
+    }
+    def tagMissing(tag : String, a : SVcfVariantLine) : Boolean = {
+      (! a.info.containsKey(tag)) || a.info(tag).get == "."
+    }
+    
+    //Map(funcID) = (numParam,desc,metaFunction(params) => function(vc))
+    val filterFunctionSetVal : Set[FilterFunction] = Set[FilterFunction]( 
+        FilterFunction(funcName="INFO.eq",numParam=2,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val v = params(1);
+                          (a : SVcfVariantLine) => {
+                            tagNonMissing(tag,a) && a.info(tag).get == v;
+                          }
+                        }
+                      ), 
+        FilterFunction(funcName="INFO.ne",numParam=2,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val v = params(1);
+                          (a : SVcfVariantLine) => {
+                            (! a.info.containsKey(tag)) || a.info(tag).get != v;
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="INFO.nm",numParam=1,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          (a : SVcfVariantLine) => {
+                            tagNonMissing(tag,a)
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="INFO.m",numParam=1,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          (a : SVcfVariantLine) => {
+                            tagMissing(tag,a)
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="INFO.gt",numParam=2,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val v = string2double(params(1));
+                          (a : SVcfVariantLine) => {
+                            tagNonMissing(tag,a) && string2double(a.info(tag).get) > v ;
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="INFO.lt",numParam=2,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val v = string2double(params(1));
+                          (a : SVcfVariantLine) => {
+                            tagNonMissing(tag,a) && string2double(a.info(tag).get) < v ;
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="INFO.ge",numParam=2,desc="", 
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val v = string2double(params(1));
+                          (a : SVcfVariantLine) => {
+                            tagNonMissing(tag,a) && string2double(a.info(tag).get) >= v ;
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="INFO.le",numParam=2,desc="", 
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val v = string2double(params(1));
+                          (a : SVcfVariantLine) => {
+                            tagNonMissing(tag,a) && string2double(a.info(tag).get) <= v ;
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="INFO.gtm",numParam=2,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val v = string2double(params(1));
+                          (a : SVcfVariantLine) => {
+                            tagMissing(tag,a) || string2double(a.info(tag).get) > v ;
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="INFO.ltm",numParam=2,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val v = string2double(params(1));
+                          (a : SVcfVariantLine) => {
+                            tagMissing(tag,a) || string2double(a.info(tag).get) < v ;
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="INFO.gem",numParam=2,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val v = string2double(params(1));
+                          (a : SVcfVariantLine) => {
+                            tagMissing(tag,a) || string2double(a.info(tag).get) >= v ;
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="INFO.lem",numParam=2,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val v = string2double(params(1));
+                          (a : SVcfVariantLine) => {
+                            tagMissing(tag,a) || string2double(a.info(tag).get) <= v ;
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="INFO.in",numParam=2,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val v = params(1);
+                          (a : SVcfVariantLine) => {
+                            tagNonMissing(tag,a) && a.info(tag).get.split(",").contains(v) ;
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="INFO.notIn",numParam=2,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val v = params(1);
+                          (a : SVcfVariantLine) => {
+                            tagMissing(tag,a) || a.info(tag).get.split(",").contains(v) ;
+                          }
+                        }
+                      ), 
+        FilterFunction(funcName="INFO.inAny", numParam = 2,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val v = params(1);
+                          (a : SVcfVariantLine) => {
+                            tagNonMissing(tag,a) && a.info(tag).get.split(",").flatMap{s => s.split("\\|")}.contains(v) ;
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="INFO.notInAny", numParam = 2,desc="",
+                        (params : Seq[String]) => { 
+                          val tag = params(0);
+                          val v = params(1);
+                          (a : SVcfVariantLine) => {
+                            tagMissing(tag,a) || a.info(tag).get.split(",").flatMap{s => s.split("\\|")}.contains(v) ;
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="INFO.inAnyOf", numParam = 2,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val v = params.tail.toSet;
+                          (a : SVcfVariantLine) => {
+                            tagNonMissing(tag,a) && a.info(tag).get.split(",").flatMap{s => s.split("\\|")}.toSet.intersect(v).size > 0 ;
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="FILTER.eq",numParam=1,desc="",
+                        (params : Seq[String]) => {
+                          val v = params(0);
+                          (a : SVcfVariantLine) => {
+                            a.filter == v;
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="FILTER.ne",numParam=1,desc="",
+                        (params : Seq[String]) => {
+                          val v = params(0);
+                          (a : SVcfVariantLine) => {
+                            a.filter != v;
+                          }
+                        }
+                      )
+    ); 
+    
+    val filterFunctionMapVal : Map[String,FilterFunction] = {
+      filterFunctionSet.map{ ff => {
+        (ff.funcName,ff)
+      }}.toMap
+    }
+    def filterFunctionSet : Set[FilterFunction] = filterFunctionSetVal;
+    def filterFunctionMap : Map[String,FilterFunction] = filterFunctionMapVal;
+  }
+  
+  case class SGenotypeFilterLogicParser() extends SFilterLogicParser[(SVcfVariantLine,Int)]{
+    
+    def getTag(tag : String, a : (SVcfVariantLine,Int)) : Option[String] = {
+      if(a._1.format.contains(tag)){
+        val value = a._1.genotypes.genotypeValues(a._1.format.indexOf(tag))(a._2);
+        if(value == ".") None;
+        else Some(value);
+      } else {
+        None;
+      }
+    }
+    def getTagArray(tag : String, a : (SVcfVariantLine,Int)) : Option[String] = {
+      if(a._1.format.contains(tag)){
+        val value = a._1.genotypes.genotypeValues(a._1.format.indexOf(tag))(a._2);
+        if(value == ".") None;
+        else Some(value);
+      } else {
+        None;
+      }
+    }    
+    
+    //Map(funcID) = (numParam,desc,metaFunction(params) => function(vc))
+    val filterFunctionSetVal : Set[FilterFunction] = Set[FilterFunction]( 
+        FilterFunction(funcName="GTAG.eq",numParam=2,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val v = params(1);
+                          (a : (SVcfVariantLine,Int)) => {
+                            val value = getTag(tag,a);
+                            value.isDefined && value.get == v;
+                          }
+                        }
+                      ), 
+        FilterFunction(funcName="GTAG.ne",numParam=2,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val v = params(1);
+                          (a : (SVcfVariantLine,Int)) => {
+                            val value = getTag(tag,a);
+                            (! value.isDefined) || value.get != v;
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="GTAG.nm",numParam=1,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          (a : (SVcfVariantLine,Int)) => {
+                            getTag(tag,a).isDefined
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="GTAG.m",numParam=1,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          (a : (SVcfVariantLine,Int)) => {
+                            ! getTag(tag,a).isDefined
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="GTAG.gt",numParam=2,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val v = string2double(params(1));
+                          (a : (SVcfVariantLine,Int)) => {
+                            val value = getTag(tag,a);
+                            value.isDefined && string2double(value.get) > v ;
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="GTAG.lt",numParam=2,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val v = string2double(params(1));
+                          (a : (SVcfVariantLine,Int)) => {
+                            val value = getTag(tag,a);
+                            value.isDefined && string2double(value.get) < v ;
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="GTAG.ge",numParam=2,desc="", 
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val v = string2double(params(1));
+                          (a : (SVcfVariantLine,Int)) => {
+                            val value = getTag(tag,a);
+                            value.isDefined && string2double(value.get) >= v ;
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="GTAG.le",numParam=2,desc="", 
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val v = string2double(params(1));
+                          (a : (SVcfVariantLine,Int)) => {
+                            val value = getTag(tag,a);
+                            value.isDefined && string2double(value.get) <= v ;
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="GTAG.gtm",numParam=2,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val v = string2double(params(1));
+                          (a : (SVcfVariantLine,Int)) => {
+                            val value = getTag(tag,a);
+                            value.isEmpty || string2double(value.get) > v ;
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="GTAG.ltm",numParam=2,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val v = string2double(params(1));
+                          (a : (SVcfVariantLine,Int)) => {
+                            val value = getTag(tag,a);
+                            value.isEmpty || string2double(value.get) < v ;
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="GTAG.gem",numParam=2,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val v = string2double(params(1));
+                          (a : (SVcfVariantLine,Int)) => {
+                            val value = getTag(tag,a);
+                            value.isEmpty || string2double(value.get) >= v ;
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="GTAG.lem",numParam=2,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val v = string2double(params(1));
+                          (a : (SVcfVariantLine,Int)) => {
+                            val value = getTag(tag,a);
+                            value.isEmpty || string2double(value.get) <= v ;
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="TAGPAIR.match",numParam=2,desc="",
+                        (params : Seq[String]) => {
+                          val tag1 = params(0);
+                          val tag2 = params(1);
+                          (a : (SVcfVariantLine,Int)) => {
+                            val t1 = getTag(tag1,a);
+                            val t2 = getTag(tag2,a);
+                            t1.isDefined && t2.isDefined && t1 == t2;
+                          }
+                        }
+                      ),
+                      
+        FilterFunction(funcName="GTAGARRAY.gt",numParam=3,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val idx = string2int(params(1));
+                          val v = string2double(params(2));
+                          (a : (SVcfVariantLine,Int)) => {
+                            val value = getTag(tag,a);
+                            if(value.isEmpty) false;
+                            else {
+                              val arr = value.get.split(",");
+                              if(arr.length < idx) false;
+                              else if(arr(idx) == ".") false;
+                              else {
+                                string2double(arr(idx)) > v;
+                              }
+                            }
+                          }
+                        }
+                      ),
+        FilterFunction(funcName="GTAGARRAYSUM.gt",numParam=2,desc="",
+                        (params : Seq[String]) => {
+                          val tag = params(0);
+                          val v = string2double(params(1));
+                          (a : (SVcfVariantLine,Int)) => {
+                            val value = getTag(tag,a);
+                            if(value.isEmpty) false;
+                            else {
+                              value.get.split(",").map{(s) => if(s == ".") 0.toDouble else string2double(s)}.sum > v
+                            }
+                          }
+                        }
+                      )
+                      
+    ); 
+    
+    val filterFunctionMapVal : Map[String,FilterFunction] = {
+      filterFunctionSet.map{ ff => {
+        (ff.funcName,ff)
+      }}.toMap
+    }
+    def filterFunctionSet : Set[FilterFunction] = filterFunctionSetVal;
+    def filterFunctionMap : Map[String,FilterFunction] = filterFunctionMapVal;
+  }
+  
+  
+  
+  /*val vcfOpBinaryFuncMap :  Map[String,((Seq[String]) => ((SVcfVariantLine,String,String) => Boolean))] = Map[String,((Seq[String]) => ((SVcfVariantLine,String,String) => Boolean))](
+        ("INFO:eq",(params : Seq[String]) => {
+          ((a : SVcfVariantLine, v1 : String, v2 : String) => {
+            a.info.containsKey(v1) && a.info(v1).get == v2;
+          })
+        })
+      );*/
+  
+/*
+         ("INFO:ne",(a : SVcfVariantLine, v1 : String, v2 : String) => {
+          (! a.info.containsKey(v1)) || a.info(v1).get != v2;
+        }),
+        ("INFO:nm",(a : SVcfVariantLine, v1 : String, v2 : String) => {
+          a.info.containsKey(v1) && a.info(v1).get != "."
+        }),
+        ("INFO:m",(a : SVcfVariantLine, v1 : String, v2 : String) => {
+          (! a.info.containsKey(v1)) || a.info(v1).get == "."
+        }),
+        ("INFO:gt",(a : SVcfVariantLine, v1 : String, v2 : String) => {
+          a.info.containsKey(v1) && a.info(v1).get != "." && string2double(a.info(v1).get) > string2double(v2);
+        }),
+        ("INFO:lt",(a : SVcfVariantLine, v1 : String, v2 : String) => {
+          a.info.containsKey(v1) && a.info(v1).get != "." && string2double(a.info(v1).get) < string2double(v2);
+        }),
+        ("INFO:gtm",(a : SVcfVariantLine, v1 : String, v2 : String) => {
+          (! a.info.containsKey(v1)) || a.info(v1).get == "." || string2double(a.info(v1).get) > string2double(v2);
+        }),
+        ("INFO:ltm",(a : SVcfVariantLine, v1 : String, v2 : String) => {
+          a.info.containsKey(v1) && string2double(a.info(v1).get) < string2double(v2);
+        }),
+        ("INFO:ge",(a : SVcfVariantLine, v1 : String, v2 : String) => {
+          a.info.containsKey(v1) && a.info(v1).get != "." && string2double(a.info(v1).get) >= string2double(v2);
+        }),
+        ("INFO:le",(a : SVcfVariantLine, v1 : String, v2 : String) => {
+          a.info.containsKey(v1) && a.info(v1).get != "." && string2double(a.info(v1).get) <= string2double(v2);
+        }),
+        ("INFO:gem",(a : SVcfVariantLine, v1 : String, v2 : String) => {
+          (! a.info.containsKey(v1)) || a.info(v1).get == "." || string2double(a.info(v1).get) >= string2double(v2);
+        }),
+        ("INFO:lem",(a : SVcfVariantLine, v1 : String, v2 : String) => {
+          (! a.info.containsKey(v1)) || a.info(v1).get == "." || string2double(a.info(v1).get) <= string2double(v2);
+        }),
+        ("INFO:in",(a : SVcfVariantLine, v1 : String, v2 : String) => {
+          a.info.containsKey(v1) && a.info(v1).get != "." && a.info(v1).get.split(",").contains(v2)
+        }),
+        ("INFO:notIn",(a : SVcfVariantLine, v1 : String, v2 : String) => {
+          (! a.info.containsKey(v1)) || a.info(v1).get == "." || (! a.info(v1).get.split(",").contains(v2))
+        }),
+        ("FILTER:eq",(a : SVcfVariantLine, v1 : String, v2 : String) => {
+          a.filter == v2;
+        })
+ */
+  
+  //val SVcfFilterParser = new SFilterLogicParser[SVcfVariantLine](vcfOpBinaryFuncMap);
+  
   
 }
 
