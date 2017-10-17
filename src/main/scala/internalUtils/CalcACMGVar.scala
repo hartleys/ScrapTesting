@@ -160,6 +160,11 @@ object CalcACMGVar {
                                          valueName = "summaryOutputFile.txt",  
                                          argDesc =  "Optional summary output file."
                                         ) :: 
+                    new UnaryArgument( name = "infileList",
+                                         arg = List("--infileList"), // name of value
+                                         argDesc = "Use this option if you want to provide input file(s) containing a list of input files rather than a single input file"+
+                                                   "" // description
+                                       ) ::
                     //new BinaryOptionArgument[List[String]](
                     //                     name = "dropKeys", 
                     //                     arg = List("--dropKeys"), 
@@ -206,10 +211,11 @@ object CalcACMGVar {
                              superGroupList = parser.get[Option[String]]("superGroupList"),
                              outfile = parser.get[Option[String]]("summaryOutputFile").getOrElse("undefinedfile.txt")
                            ), flag = parser.get[Option[String]]("summaryOutputFile").isDefined
-                   ).walkVCFFile(
+                   ).walkVCFFiles(
                      infile    = parser.get[String]("invcf"),
                      outfile   = parser.get[String]("outvcf"),
-                     chromList = parser.get[Option[List[String]]]("chromList")
+                     chromList = parser.get[Option[List[String]]]("chromList"),
+                     infileList = parser.get[Boolean]("infileList")
                    )
            
      }
@@ -876,7 +882,7 @@ object CalcACMGVar {
       
     }*/
     
-      val (clinVarVariantSet,clinVarVariants) : (scala.collection.Map[String,(String,Int,String)],scala.collection.Map[String,Set[internalUtils.TXUtil.pVariantInfo]]) = getFullClinVarVariants(infile=clinVarVcf,chromList =chromList, vcfCodes = vcfCodes, hgmdVarVcf = hgmdVarVcf);
+      val (clinVarVariantSet,clinVarVariants) : (scala.collection.mutable.Map[String,(String,Int,String)],scala.collection.mutable.Map[String,Set[internalUtils.TXUtil.pVariantInfo]]) = getFullClinVarVariants(infile=clinVarVcf,chromList =chromList, vcfCodes = vcfCodes, hgmdVarVcf = hgmdVarVcf);
       
       val clinVarVariants_StopLoss_Patho = clinVarVariants.map{ case (tx,varSet) => {
         ((tx,varSet.flatMap{case pvar => {
@@ -888,7 +894,7 @@ object CalcACMGVar {
             None;
           }
         }}))
-      }}
+      }}.withDefaultValue(Set());
       val clinVarVariants_StopLoss_Benign = clinVarVariants.map{ case (tx,varSet) => {
         ((tx,varSet.flatMap{case pvar => {
           if( pvar.CLNSIG != 3 && pvar.CLNSIG != 2 ){
@@ -899,23 +905,23 @@ object CalcACMGVar {
             None;
           }
         }}))
-      }}
+      }}.withDefaultValue(Set());
       
       val clinVarVariants_LOFSet = clinVarVariants.map{ case (tx,varSet) => {
         (tx,varSet.filter{ v => {
           v.severityType == "LLOF"  // && (v.CLNSIG == 4 || v.CLNSIG == 5)
         }})
-      }}
+      }}.withDefaultValue(Set());
       val clinVarVariants_startLoss = clinVarVariants.map{ case (tx,varSet) => {
         (tx,varSet.filter{ v => {
           v.pType == "START-LOSS"  // && (v.CLNSIG == 4 || v.CLNSIG == 5)
         }})
-      }}
+      }}.withDefaultValue(Set());
       val clinVarVariants_stopLoss = clinVarVariants.map{ case (tx,varSet) => {
         (tx,varSet.filter{ v => {
           v.pType == "STOP-LOSS"  // && (v.CLNSIG == 4 || v.CLNSIG == 5)
         }})
-      }}
+      }}.withDefaultValue(Set());
       
       
     
@@ -1453,7 +1459,7 @@ object CalcACMGVar {
       var txHasStopLoss_CANON = Set[String]();
       
       combo.foreach{ case (g,tx,info,c,i) => {
-        val hasDownstreamPatho = clinVarVariants_LOFSet(tx).exists{ p => {
+        val hasDownstreamPatho = clinVarVariants_LOFSet.getOrElse(tx,Set()).exists{ p => {
           p.start >= info.start && (p.CLNSIG == 4 || p.CLNSIG == 5)
         }}
         if(hasDownstreamPatho){
@@ -1465,7 +1471,7 @@ object CalcACMGVar {
           }
         }
         
-        val hasStartLoss = clinVarVariants_startLoss(tx).exists{ p => {
+        val hasStartLoss = clinVarVariants_startLoss.getOrElse(tx,Set()).exists{ p => {
           (p.CLNSIG == 4 || p.CLNSIG == 5)
         }}
         if(hasStartLoss){
@@ -1945,7 +1951,7 @@ object CalcACMGVar {
   
   //output: tx => Set[(HGVDc,pVariantInfo])]
   def getFullClinVarVariants(infile : String, chromList : Option[List[String]], vcfCodes : VCFAnnoCodes = VCFAnnoCodes(), hgmdVarVcf : Option[String] = None
-                            ) : (scala.collection.Map[String,(String,Int,String)],scala.collection.Map[String,Set[internalUtils.TXUtil.pVariantInfo]]) = {
+                            ) : (scala.collection.mutable.Map[String,(String,Int,String)],scala.collection.mutable.Map[String,Set[internalUtils.TXUtil.pVariantInfo]]) = {
 
     val out = new scala.collection.mutable.AnyRefMap[String,Set[internalUtils.TXUtil.pVariantInfo]](((k : String) => Set[internalUtils.TXUtil.pVariantInfo]()));
     
@@ -2058,7 +2064,7 @@ object CalcACMGVar {
             val vMutCList = vMutCListRaw.map(_.toString.split("\\|").toVector);
             val chrom = v.getContig();
             
-            val vMutGList = v.getAttributeAsList(vcfCodes.vMutG_TAG).toVector.filter(_ != ".");
+            val vMutGList = v.getAttributeAsList(vcfCodes.vMutG_TAG).toVector.map(_.toString()).filter(_ != ".");
             
             val hgmdClass = v.getAttributeAsList("").toVector.map(_.toString()).padTo(1,"NA");
             
@@ -2089,7 +2095,7 @@ object CalcACMGVar {
                  }
                  if(gset.containsKey(chrom + ":" + vMutGList(altIdx))){
                    val oldVal = gset(chrom + ":" + vMutGList(altIdx));
-                   gset(chrom + ":" + vMutGList(altIdx)) = (oldVal+"|HGMDID_"+rsnum,5,oldVal+"HGMD_"+hgmdClass(altIdx));
+                   gset(chrom + ":" + vMutGList(altIdx)) = (oldVal._1+"|HGMDID_"+rsnum,5,oldVal._3+"|HGMD_"+hgmdClass(altIdx));
                  } else {
                    gset(chrom + ":" + vMutGList(altIdx)) = ("HGMDID_"+rsnum,5,"HGMD_"+hgmdClass(altIdx));
                  }

@@ -242,6 +242,29 @@ object VcfTool {
       vcfWriter.close();
     }
     
+    def walkVCFFiles(infile : String, outfile : String, chromList : Option[List[String]], infileList : Boolean, vcfCodes : VCFAnnoCodes = VCFAnnoCodes(), verbose : Boolean = true) {
+      if(infileList){
+        val (peekList,fileiter) = peekIterator(getLinesSmartUnzip(infile),1000);
+        val denominator = if(peekList.length == 1000) "?" else peekList.length.toString;
+        val (firstIter,vcfHeader) = internalUtils.VcfTool.getVcfIterator(peekList.head, 
+                                       chromList = chromList,
+                                       vcfCodes = vcfCodes);
+        val vcIter = firstIter ++ fileiter.drop(1).flatMap{file => {
+          internalUtils.VcfTool.getVcfIterator(file, 
+                                       chromList = chromList,
+                                       vcfCodes = vcfCodes)._1;
+        }}
+        val (vcIter2, newHeader) = this.walkVCF(vcIter = vcIter, vcfHeader = vcfHeader)
+        val vcfWriter = internalUtils.VcfTool.getVcfWriter(outfile, header = newHeader);
+        vcIter2.foreach(vc => {
+          vcfWriter.add(vc)
+        })
+        vcfWriter.close();
+      } else {
+        walkVCFFile(infile=infile,outfile=outfile,chromList=chromList,vcfCodes=vcfCodes,verbose=verbose);
+      }
+    }
+    
     def chain(walker2 : VCFWalker, flag : Boolean = true) : VCFWalker = {
       if(flag){
         val parent : VCFWalker = this;
